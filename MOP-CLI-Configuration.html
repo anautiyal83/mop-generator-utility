@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MOP Generator – CLI-Based Configuration (MRF / DPA)</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #0d1117;
+  color: #e0e0e0;
+  padding: 30px 30px 60px;
+  min-width: 1100px;
+}
+
+/* ── PAGE TITLE ── */
+.page-title { text-align:center; font-size:22px; font-weight:700; color:#fff; letter-spacing:1px; margin-bottom:4px; }
+.page-badge {
+  display:inline-block; background:#0a1530; border:1px solid #1a4a8a;
+  color:#4a9aff; font-size:11px; font-weight:700; padding:3px 12px;
+  border-radius:20px; letter-spacing:1px; margin-bottom:6px;
+}
+.page-sub { text-align:center; font-size:12px; color:#5a7a9a; margin-bottom:34px; }
+
+.section-heading {
+  font-size:12px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+  color:#5a8aaa; margin-bottom:14px; border-left:3px solid #2a5a7a;
+  padding-left:10px;
+}
+
+/* ══════════════ PART 1 – YAML VIEW ══════════════ */
+.yaml-wrapper {
+  display:flex; gap:0; background:#161b25; border:1px solid #2a3a50;
+  border-radius:12px; overflow:hidden; margin-bottom:40px;
+  box-shadow:0 4px 24px rgba(0,0,0,0.4);
+}
+.yaml-panel { flex:0 0 580px; background:#0d1117; border-right:1px solid #2a3a50; }
+.yaml-topbar {
+  background:#161b25; padding:10px 16px; display:flex; align-items:center;
+  gap:8px; border-bottom:1px solid #2a3a50;
+}
+.yaml-dot { width:11px; height:11px; border-radius:50%; }
+.yaml-filename { margin-left:6px; font-size:11px; color:#7a9abf; font-family:'Consolas',monospace; }
+.yaml-body { padding:14px 0; font-family:'Consolas','Courier New',monospace; font-size:12px; line-height:1.75; }
+
+.y-line { display:flex; align-items:stretch; }
+.y-num  { width:40px; text-align:right; color:#3a4a5a; padding-right:14px; user-select:none; font-size:11px; flex-shrink:0; padding-top:1px; }
+.y-bar  { width:4px; flex-shrink:0; margin-right:10px; }
+.y-code { flex:1; white-space:pre; padding-right:16px; }
+
+.yk { color:#79b8ff; } .yv { color:#f6c27a; } .yc { color:#4a6a4a; }
+.ym { color:#e06c75; } .yn { color:#b5cea8; } .ys { color:#ce9178; }
+
+/* section bg colours */
+.s0  { background:transparent; }
+.s1  { background:rgba(30,80,160,0.10); }
+.s2  { background:rgba(160,110,20,0.12); }
+.s3a { background:rgba(20,110,60,0.12); }
+.s3b { background:rgba(80,20,160,0.14); }
+.s3c { background:rgba(20,110,110,0.12); }
+.s4  { background:rgba(30,80,160,0.10); }
+.s5a { background:rgba(160,20,20,0.12); }
+.s5b { background:rgba(110,20,160,0.13); }
+.s5c { background:rgba(160,20,20,0.10); }
+
+/* legend sidebar */
+.yaml-legend { flex:1; padding:20px 18px; background:#101520; }
+.yaml-legend-title { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#4a6a8a; margin-bottom:14px; }
+.leg-item { display:flex; align-items:flex-start; gap:10px; margin-bottom:12px; }
+.leg-swatch { width:14px; height:14px; border-radius:3px; flex-shrink:0; margin-top:2px; border:1px solid rgba(255,255,255,0.08); }
+.leg-name { font-size:11px; font-weight:700; color:#dde8f5; }
+.leg-sub  { font-size:10px; color:#5a7a9a; margin-top:1px; }
+.leg-key  { font-family:'Consolas',monospace; font-size:10px; color:#88aadd; background:rgba(255,255,255,0.05); padding:1px 5px; border-radius:3px; margin-top:3px; display:inline-block; }
+
+/* ══════════════ PART 2 – CARDS ══════════════ */
+.cards-row { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:14px; }
+.cards-row-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-bottom:14px; }
+.cards-row-1 { display:grid; grid-template-columns:1fr; gap:14px; margin-bottom:14px; }
+
+.card {
+  border-radius:10px; padding:16px 18px; font-size:12px; line-height:1.6;
+  border-left:4px solid transparent;
+}
+.card-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.card-num {
+  font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px;
+  white-space:nowrap; flex-shrink:0;
+}
+.card-title { font-size:14px; font-weight:700; color:#fff; }
+.card-row { display:flex; gap:6px; margin-bottom:5px; font-size:11px; }
+.card-key { color:#5a8aaa; min-width:88px; flex-shrink:0; font-weight:600; }
+.card-val { color:#c8d8e8; }
+.card-val code { background:rgba(255,255,255,0.07); padding:0 4px; border-radius:3px; font-family:'Consolas',monospace; font-size:10px; color:#88ccff; }
+.divider { border:none; border-top:1px solid rgba(255,255,255,0.06); margin:10px 0; }
+.card-desc { font-size:11px; color:#8a9aaa; line-height:1.65; }
+.cmd-block {
+  margin-top:9px; background:rgba(0,0,0,0.35); border-radius:5px;
+  padding:9px 11px; font-family:'Consolas',monospace; font-size:10.5px;
+  color:#88aa88; line-height:1.75; border-left:2px solid #2a4a2a;
+}
+.badges { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; }
+.badge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:9px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; }
+.b-cli  { background:#0a2440; color:#4a9aff; border:1px solid #1a4a7a; }
+.b-opt  { background:#181830; color:#9999ff; border:1px solid #2a2a6a; }
+.b-req  { background:#240a0a; color:#ff6666; border:1px solid #5a1a1a; }
+.b-mrf  { background:#0a1e1e; color:#44dddd; border:1px solid #0a4a4a; }
+.b-dpa  { background:#1e1a0a; color:#ddcc44; border:1px solid #4a440a; }
+
+/* themes */
+.t-blue   { background:#0c1c32; border-color:#1e5aaa; }
+.t-amber  { background:#1c140a; border-color:#aa7a00; }
+.t-green  { background:#0a1c10; border-color:#1a7a44; }
+.t-purple { background:#120a1e; border-color:#7a22aa; }
+.t-teal   { background:#0a1c1c; border-color:#1a8a8a; }
+.t-red    { background:#1c0a0a; border-color:#aa1a1a; }
+.t-dark   { background:#0e1020; border-color:#3a3a6a; }
+
+.n-blue   { background:#1e5aaa; color:#fff; }
+.n-amber  { background:#aa7a00; color:#fff; }
+.n-green  { background:#1a7a44; color:#fff; }
+.n-purple { background:#7a22aa; color:#fff; }
+.n-teal   { background:#1a8a8a; color:#fff; }
+.n-red    { background:#aa1a1a; color:#fff; }
+
+/* ══════════════ PART 3 – FLOW ══════════════ */
+.flow-row {
+  display:flex; align-items:stretch; gap:0; background:#0e1520;
+  border:1px solid #2a3a50; border-radius:12px; overflow:hidden;
+  margin-bottom:40px; padding:24px 20px; gap:0;
+}
+.flow-step {
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  padding:0 8px; position:relative;
+}
+.flow-step:not(:last-child)::after {
+  content:'▶'; position:absolute; right:-12px; top:50%; transform:translateY(-50%);
+  color:#2a4a6a; font-size:18px; z-index:1;
+}
+.flow-box {
+  width:100%; border-radius:8px; padding:12px 10px; text-align:center;
+  font-size:11px; line-height:1.5;
+}
+.flow-title { font-size:12px; font-weight:700; color:#fff; margin-bottom:4px; }
+.flow-sub { font-size:10px; color:#7a9aaa; }
+.flow-num { font-size:20px; font-weight:800; opacity:0.2; margin-bottom:4px; }
+</style>
+</head>
+<body>
+
+<div style="text-align:center;margin-bottom:6px">
+  <span class="page-badge">CLI-BASED MODE</span>
+</div>
+<div class="page-title">MOP Generator — Static CLI Configuration</div>
+<p class="page-sub">For file-based activities &nbsp;·&nbsp; MRF Announcement Loading &nbsp;·&nbsp; DPA Handset Details Update</p>
+
+<!-- ══════════════════════════════════════
+     PART 1 — YAML STRUCTURE
+     ══════════════════════════════════════ -->
+<div class="section-heading">Part 1 — YAML Template Structure</div>
+
+<div class="yaml-wrapper">
+  <div class="yaml-panel">
+    <div class="yaml-topbar">
+      <div class="yaml-dot" style="background:#ff5f56"></div>
+      <div class="yaml-dot" style="background:#ffbd2e"></div>
+      <div class="yaml-dot" style="background:#27c93f"></div>
+      <span class="yaml-filename">MRF_ANNOUNCEMENT_LOADING_MOP-Template.yaml</span>
+    </div>
+    <div class="yaml-body">
+
+<div class="y-line s0"><span class="y-num">1</span><div class="y-bar" style="background:transparent"></div><span class="y-code"><span class="yc"># No xmlBuilder / tables / configAttributes needed</span></span></div>
+<div class="y-line s0"><span class="y-num">2</span><div class="y-bar" style="background:transparent"></div><span class="y-code"><span class="yc"># All configuration is defined as static CLI commands</span></span></div>
+<div class="y-line s0"><span class="y-num">3</span><div class="y-bar" style="background:transparent"></div><span class="y-code"></span></div>
+
+<div class="y-line s1"><span class="y-num">4</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code"><span class="yc"># ── §1  PRE_NODE_HEALTH_CHECK ───────────────────────</span></span></div>
+<div class="y-line s1"><span class="y-num">5</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code"><span class="yk">preNodeHealthCheck</span>:</span></div>
+<div class="y-line s1"><span class="y-num">6</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">  <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"PRE_NODE_HEALTH_CHECK"</span></span></div>
+<div class="y-line s1"><span class="y-num">7</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">description</span>: <span class="yv">"Verify node health before announcement loading"</span></span></div>
+<div class="y-line s1"><span class="y-num">8</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s1"><span class="y-num">9</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s1"><span class="y-num">10</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">commands</span>:</span></div>
+<div class="y-line s1"><span class="y-num">11</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">      <span class="ym">-</span> <span class="yv">"date"</span>                 <span class="yc"># INFO</span></span></div>
+<div class="y-line s1"><span class="y-num">12</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">      <span class="ym">-</span> <span class="yv">"service swms status"</span>  <span class="yc"># Validate: running</span></span></div>
+<div class="y-line s0"><span class="y-num">13</span><div class="y-bar" style="background:transparent"></div><span class="y-code"></span></div>
+
+<div class="y-line s2"><span class="y-num">14</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code"><span class="yc"># ── §2  BACKUP ──────────────────────────────────────</span></span></div>
+<div class="y-line s2"><span class="y-num">15</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code"><span class="yk">backup</span>:</span></div>
+<div class="y-line s2"><span class="y-num">16</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code">  <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"BACKUP"</span></span></div>
+<div class="y-line s2"><span class="y-num">17</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code">    <span class="ys">description</span>: <span class="yv">"Back up existing announcement files"</span></span></div>
+<div class="y-line s2"><span class="y-num">18</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code">    <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s2"><span class="y-num">19</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code">    <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s2"><span class="y-num">20</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code">    <span class="ys">commands</span>:</span></div>
+<div class="y-line s2"><span class="y-num">21</span><div class="y-bar" style="background:#aa7a00"></div><span class="y-code">      <span class="ym">-</span> <span class="yv">"cp -rp $ANN_DIR ${ANN_DIR}.bkp_$(date +%Y%m%d)"</span></span></div>
+<div class="y-line s0"><span class="y-num">22</span><div class="y-bar" style="background:transparent"></div><span class="y-code"></span></div>
+
+<div class="y-line s0"><span class="y-num">23</span><div class="y-bar" style="background:transparent"></div><span class="y-code"><span class="yc"># ── §3  ACTIVITY ────────────────────────────────────</span></span></div>
+<div class="y-line s0"><span class="y-num">24</span><div class="y-bar" style="background:transparent"></div><span class="y-code"><span class="yk">activity</span>:</span></div>
+<div class="y-line s3a"><span class="y-num">25</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">  <span class="yc"># §3a  precheck ────────────────────────────────</span></span></div>
+<div class="y-line s3a"><span class="y-num">26</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">  <span class="yk">precheck</span>:</span></div>
+<div class="y-line s3a"><span class="y-num">27</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"ACTIVITY_PRECHECK"</span></span></div>
+<div class="y-line s3a"><span class="y-num">28</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"Capture state of announcement directory"</span></span></div>
+<div class="y-line s3a"><span class="y-num">29</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">      <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s3a"><span class="y-num">30</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">      <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s3a"><span class="y-num">31</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">      <span class="ys">commands</span>:</span></div>
+<div class="y-line s3a"><span class="y-num">32</span><div class="y-bar" style="background:#1a7a44"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"ls -la $ANN_DIR"</span></span></div>
+
+<div class="y-line s3b"><span class="y-num">33</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">  <span class="yc"># §3b  execution (static CLI — core activity) ──</span></span></div>
+<div class="y-line s3b"><span class="y-num">34</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">  <span class="yk">execution</span>:</span></div>
+<div class="y-line s3b"><span class="y-num">35</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"TRANSFER_ANNOUNCEMENT_FILES"</span></span></div>
+<div class="y-line s3b"><span class="y-num">36</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"SFTP announcement files to /tmp on MRF"</span></span></div>
+<div class="y-line s3b"><span class="y-num">37</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s3b"><span class="y-num">38</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s3b"><span class="y-num">39</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">commands</span>:</span></div>
+<div class="y-line s3b"><span class="y-num">40</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"# SFTP announcement file(s) to /tmp"</span></span></div>
+<div class="y-line s3b"><span class="y-num">41</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"ls -la /tmp/$ANN_FILE"</span></span></div>
+<div class="y-line s3b"><span class="y-num">42</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"LOAD_ANNOUNCEMENT_FILES"</span></span></div>
+<div class="y-line s3b"><span class="y-num">43</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"Copy files to announcement dir and set permissions"</span></span></div>
+<div class="y-line s3b"><span class="y-num">44</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s3b"><span class="y-num">45</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s3b"><span class="y-num">46</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">commands</span>:</span></div>
+<div class="y-line s3b"><span class="y-num">47</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"cp /tmp/$ANN_FILE $ANN_DIR"</span></span></div>
+<div class="y-line s3b"><span class="y-num">48</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"chmod 777 $ANN_DIR/$ANN_FILE"</span></span></div>
+
+<div class="y-line s3c"><span class="y-num">49</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">  <span class="yc"># §3c  postcheck ───────────────────────────────</span></span></div>
+<div class="y-line s3c"><span class="y-num">50</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">  <span class="yk">postcheck</span>:</span></div>
+<div class="y-line s3c"><span class="y-num">51</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"ACTIVITY_POSTCHECK"</span></span></div>
+<div class="y-line s3c"><span class="y-num">52</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"Verify files copied with correct permissions"</span></span></div>
+<div class="y-line s3c"><span class="y-num">53</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">      <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s3c"><span class="y-num">54</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">      <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s3c"><span class="y-num">55</span><div class="y-bar" style="background:#1a8a8a"></div><span class="y-code">      <span class="ys">commands</span>: [<span class="yv">"ls -la $ANN_DIR"</span>]</span></div>
+<div class="y-line s0"><span class="y-num">56</span><div class="y-bar" style="background:transparent"></div><span class="y-code"></span></div>
+
+<div class="y-line s4"><span class="y-num">57</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code"><span class="yc"># ── §4  POST_NODE_HEALTH_CHECK ──────────────────────</span></span></div>
+<div class="y-line s4"><span class="y-num">58</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code"><span class="yk">postNodeHealthCheck</span>:</span></div>
+<div class="y-line s4"><span class="y-num">59</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">  <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"POST_NODE_HEALTH_CHECK"</span></span></div>
+<div class="y-line s4"><span class="y-num">60</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">description</span>: <span class="yv">"Verify node health after announcement loading"</span></span></div>
+<div class="y-line s4"><span class="y-num">61</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s4"><span class="y-num">62</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s4"><span class="y-num">63</span><div class="y-bar" style="background:#1e5aaa"></div><span class="y-code">    <span class="ys">commands</span>: [<span class="yv">"service swms status"</span>]</span></div>
+<div class="y-line s0"><span class="y-num">64</span><div class="y-bar" style="background:transparent"></div><span class="y-code"></span></div>
+
+<div class="y-line s0"><span class="y-num">65</span><div class="y-bar" style="background:transparent"></div><span class="y-code"><span class="yc"># ── §5  ROLLBACK ────────────────────────────────────</span></span></div>
+<div class="y-line s0"><span class="y-num">66</span><div class="y-bar" style="background:transparent"></div><span class="y-code"><span class="yk">rollback</span>:</span></div>
+<div class="y-line s5a"><span class="y-num">67</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">  <span class="yc"># §5a  precheck ────────────────────────────────</span></span></div>
+<div class="y-line s5a"><span class="y-num">68</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">  <span class="yk">precheck</span>:</span></div>
+<div class="y-line s5a"><span class="y-num">69</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>: <span class="yv">"ROLLBACK_PRECHECK"</span></span></div>
+<div class="y-line s5a"><span class="y-num">70</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"Verify backup exists before rollback"</span></span></div>
+<div class="y-line s5a"><span class="y-num">71</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">targetNode</span>: <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s5a"><span class="y-num">72</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">method</span>: <span class="yn">CLI</span></span></div>
+<div class="y-line s5a"><span class="y-num">73</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">commands</span>: [<span class="yv">"ls -la ${ANN_DIR}.bkp_*"</span>]</span></div>
+
+<div class="y-line s5b"><span class="y-num">74</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">  <span class="yc"># §5b  execution (static CLI rollback) ─────────</span></span></div>
+<div class="y-line s5b"><span class="y-num">75</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">  <span class="yk">execution</span>:</span></div>
+<div class="y-line s5b"><span class="y-num">76</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>:        <span class="yv">"ROLLBACK_ANNOUNCEMENT_FILES"</span></span></div>
+<div class="y-line s5b"><span class="y-num">77</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"Restore files from backup or remove new files"</span></span></div>
+<div class="y-line s5b"><span class="y-num">78</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">targetNode</span>:  <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s5b"><span class="y-num">79</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">method</span>:      <span class="yn">CLI</span></span></div>
+<div class="y-line s5b"><span class="y-num">80</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">      <span class="ys">commands</span>:</span></div>
+<div class="y-line s5b"><span class="y-num">81</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"cp -p ${ANN_DIR}.bkp/$ANN_FILE $ANN_DIR"</span></span></div>
+<div class="y-line s5b"><span class="y-num">82</span><div class="y-bar" style="background:#7a22aa"></div><span class="y-code">        <span class="ym">-</span> <span class="yv">"# OR: rm -f $ANN_DIR/$ANN_FILE"</span></span></div>
+
+<div class="y-line s5c"><span class="y-num">83</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">  <span class="yc"># §5c  postcheck ───────────────────────────────</span></span></div>
+<div class="y-line s5c"><span class="y-num">84</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">  <span class="yk">postcheck</span>:</span></div>
+<div class="y-line s5c"><span class="y-num">85</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">    <span class="ym">-</span> <span class="ys">name</span>: <span class="yv">"ROLLBACK_POSTCHECK"</span></span></div>
+<div class="y-line s5c"><span class="y-num">86</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">description</span>: <span class="yv">"Verify rollback completed and dir is restored"</span></span></div>
+<div class="y-line s5c"><span class="y-num">87</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">targetNode</span>: <span class="yv">"MRF_NODE"</span></span></div>
+<div class="y-line s5c"><span class="y-num">88</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">method</span>: <span class="yn">CLI</span></span></div>
+<div class="y-line s5c"><span class="y-num">89</span><div class="y-bar" style="background:#aa1a1a"></div><span class="y-code">      <span class="ys">commands</span>: [<span class="yv">"ls -la $ANN_DIR"</span>]</span></div>
+
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="yaml-legend">
+    <div class="yaml-legend-title">Section Legend</div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#1e5aaa"></div><div><div class="leg-name">§1 preNodeHealthCheck</div><div class="leg-sub">Lines 4–12 · before any changes</div><div class="leg-key">preNodeHealthCheck</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#aa7a00"></div><div><div class="leg-name">§2 backup</div><div class="leg-sub">Lines 14–21 · save current state</div><div class="leg-key">backup</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#1a7a44"></div><div><div class="leg-name">§3a activity › precheck</div><div class="leg-sub">Lines 25–32 · baseline snapshot</div><div class="leg-key">activity.precheck</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#7a22aa"></div><div><div class="leg-name">§3b activity › execution</div><div class="leg-sub">Lines 33–48 · core CLI steps</div><div class="leg-key">activity.execution</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#1a8a8a"></div><div><div class="leg-name">§3c activity › postcheck</div><div class="leg-sub">Lines 49–55 · verify changes</div><div class="leg-key">activity.postcheck</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#1e5aaa"></div><div><div class="leg-name">§4 postNodeHealthCheck</div><div class="leg-sub">Lines 57–63 · after all changes</div><div class="leg-key">postNodeHealthCheck</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#aa1a1a"></div><div><div class="leg-name">§5a rollback › precheck</div><div class="leg-sub">Lines 67–73 · confirm backup exists</div><div class="leg-key">rollback.precheck</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#7a22aa"></div><div><div class="leg-name">§5b rollback › execution</div><div class="leg-sub">Lines 74–82 · restore from backup</div><div class="leg-key">rollback.execution</div></div></div>
+    <div class="leg-item"><div class="leg-swatch" style="background:#aa1a1a"></div><div><div class="leg-name">§5c rollback › postcheck</div><div class="leg-sub">Lines 83–89 · verify restored</div><div class="leg-key">rollback.postcheck</div></div></div>
+    <hr style="border-color:#2a3a4a;margin:14px 0">
+    <div style="font-size:10px;color:#4a6a7a;line-height:1.8">
+      <b style="color:#6a8aaa">Key difference from XML mode:</b><br>
+      ✦ No <code style="color:#79b8ff">xmlBuilder</code> or <code style="color:#79b8ff">tables</code><br>
+      ✦ No <code style="color:#79b8ff">configAttributes</code><br>
+      ✦ Uses <code style="color:#79b8ff">execution</code> instead of <code style="color:#79b8ff">configuration</code><br>
+      ✦ Multiple named blocks per activity<br>
+      ✦ Rollback uses <code style="color:#79b8ff">execution</code> not auto-generated DELETE XML
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PART 2 — SECTION CARDS
+     ══════════════════════════════════════ -->
+<div class="section-heading">Part 2 — Section Descriptions</div>
+
+<div class="cards-row">
+  <div class="card t-blue">
+    <div class="card-header"><span class="card-num n-blue">§ 1</span><span class="card-title">preNodeHealthCheck</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>preNodeHealthCheck</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">First — before backup or any file change</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Confirms the node service is running and files are present before proceeding. Any failure here blocks the entire activity.</div>
+    <div class="cmd-block">date; time
+service swms status         # MRF
+ls -ltrh /export/.../tools/phoneimport  # DPA
+ps -ef | grep dpa; uptime   # DPA</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-req">Required</span></div>
+  </div>
+
+  <div class="card t-amber">
+    <div class="card-header"><span class="card-num n-amber">§ 2</span><span class="card-title">backup</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>backup</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">After pre-health, before activity</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Creates a named backup of the current files. The backup filename (with version/date suffix) is used later during rollback to restore to the pre-activity state.</div>
+    <div class="cmd-block">cp -rp $ANN_DIR ${ANN_DIR}.bkp_$(date)   # MRF
+cp -p phones.dat OldDLUBKP/phones.dat_bkp$VER  # DPA</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-req">Required</span></div>
+  </div>
+
+  <div class="card t-green">
+    <div class="card-header"><span class="card-num n-green">§ 3a</span><span class="card-title">activity › precheck</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>activity.precheck</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">Before execution blocks</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Captures a detailed baseline — current directory listing, current version — before making changes. Output is compared with postcheck to confirm the change took effect.</div>
+    <div class="cmd-block">ls -la $ANN_DIR             # MRF
+tail -20 phoneimporter.log  # DPA: record current DLU version</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-opt">Optional</span></div>
+  </div>
+</div>
+
+<div class="cards-row">
+  <div class="card t-purple" style="grid-column:span 2">
+    <div class="card-header"><span class="card-num n-purple">§ 3b</span><span class="card-title">activity › execution &nbsp;<span style="font-size:11px;font-weight:400;color:#9a7acc">— Core Activity (CLI)</span></span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>activity.execution</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">Between precheck and postcheck — this is the actual work</span></div>
+    <div class="card-row"><span class="card-key">Blocks</span><span class="card-val">One MOP block per list entry — multiple named steps supported</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA (and any future file-based activity)</span></div>
+    <hr class="divider">
+    <div class="card-desc">The core of the CLI-based activity. Each entry becomes a separate named MOP block, allowing logical grouping of steps. Unlike XML mode, commands are written directly in YAML — no CIQ data processing occurs.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+      <div>
+        <div style="font-size:10px;color:#8a7acc;margin-bottom:5px;font-weight:700">MRF — Announcement Loading</div>
+        <div class="cmd-block">name: TRANSFER_ANNOUNCEMENT_FILES
+→ SFTP files to /tmp; ls verify
+
+name: LOAD_ANNOUNCEMENT_FILES
+→ cp /tmp/$ANN_FILE $ANN_DIR
+→ chmod 777 $ANN_DIR/$ANN_FILE</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#ccaa44;margin-bottom:5px;font-weight:700">DPA — phones.dat Update</div>
+        <div class="cmd-block">name: DEPLOY_PHONES_DAT
+→ cp $NEW_FILE .../phoneimport/phones.dat
+
+name: IMPORT_PHONES_DAT
+→ sudo ./importtodpa.sh
+→ tail phoneimporter.log  # verify version
+
+name: START_PHONES_LOADER
+→ startLoader.sh PHONES</div>
+      </div>
+    </div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-req">Required</span><span class="badge b-mrf">MRF</span><span class="badge b-dpa">DPA</span></div>
+  </div>
+
+  <div class="card t-teal">
+    <div class="card-header"><span class="card-num n-teal">§ 3c</span><span class="card-title">activity › postcheck</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>activity.postcheck</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">After all execution blocks</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Verifies the file operation completed as expected — correct files present, correct permissions, correct version. Diff against precheck output confirms the change.</div>
+    <div class="cmd-block">ls -la $ANN_DIR           # MRF
+ls -ls phones.dat
+tail -20 phoneimporter.log  # DPA: new DLU version</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-opt">Optional</span></div>
+  </div>
+</div>
+
+<div class="cards-row">
+  <div class="card t-blue">
+    <div class="card-header"><span class="card-num n-blue">§ 4</span><span class="card-title">postNodeHealthCheck</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>postNodeHealthCheck</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">After all activity blocks</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Repeats the pre-health check commands to confirm no degradation. Compares against pre-health baseline. Node service must still be running.</div>
+    <div class="cmd-block">service swms status   # MRF
+df -kh; free -g; ps -ef | grep dpa  # DPA</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-req">Required</span></div>
+  </div>
+
+  <div class="card t-red">
+    <div class="card-header"><span class="card-num n-red">§ 5a</span><span class="card-title">rollback › precheck</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>rollback.precheck</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">First step of rollback</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Confirms the backup created in §2 still exists and is accessible before attempting to restore it. Prevents a failed rollback when the backup was never created or was deleted.</div>
+    <div class="cmd-block">ls -la ${ANN_DIR}.bkp_*  # MRF: backup dir exists
+tail -20 phoneimporter.log  # DPA: record current version</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-req">Required</span></div>
+  </div>
+
+  <div class="card t-purple">
+    <div class="card-header"><span class="card-num n-purple">§ 5b</span><span class="card-title">rollback › execution</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>rollback.execution</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">Core rollback — restores previous state</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Restores files from the backup created in §2 and re-runs any import or loader scripts to activate the restored version. If no backup exists, removes the newly added files.</div>
+    <div class="cmd-block">cp -p ${ANN_DIR}.bkp/$FILE $ANN_DIR  # MRF
+cp -p OldDLUBKP/phones.dat_bkp$VER phones.dat
+sudo ./importtodpa.sh; startLoader.sh PHONES  # DPA</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-mrf">MRF</span><span class="badge b-dpa">DPA</span></div>
+  </div>
+</div>
+
+<div class="cards-row-1">
+  <div class="card t-red">
+    <div class="card-header"><span class="card-num n-red">§ 5c</span><span class="card-title">rollback › postcheck</span></div>
+    <div class="card-row"><span class="card-key">YAML key</span><span class="card-val"><code>rollback.postcheck</code></span></div>
+    <div class="card-row"><span class="card-key">Runs</span><span class="card-val">Final step of rollback</span></div>
+    <div class="card-row"><span class="card-key">Node types</span><span class="card-val">MRF, DPA</span></div>
+    <hr class="divider">
+    <div class="card-desc">Confirms the rollback succeeded. For MRF: announcement directory matches pre-activity state. For DPA: phones.dat version reverted to the backed-up version; new version must differ from current.</div>
+    <div class="cmd-block">ls -la $ANN_DIR                          # MRF: files restored
+tail -20 phoneimporter.log               # DPA: old DLU version confirmed
+# DPA guard: if rollback_ver == current_ver → ERROR rollback did not happen</div>
+    <div class="badges"><span class="badge b-cli">Static CLI</span><span class="badge b-req">Required</span></div>
+  </div>
+</div>
+
+</body>
+</html>

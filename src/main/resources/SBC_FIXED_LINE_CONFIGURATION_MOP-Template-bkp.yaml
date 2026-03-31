@@ -1,0 +1,364 @@
+# ============================================================================
+# MOP Template: SBC - FIXED_LINE_CONFIGURATION
+# Naming convention: {NODE_TYPE}_{ACTIVITY}_MOP-Template.yaml
+#
+# This is the ONLY file that needs to be created/modified to support a new
+# node type or activity.  The Java code is fully generic.
+#
+# Reuse:
+#   SBC_common_blocks.yaml is loaded first as the base.
+#   Any key defined here OVERRIDES the corresponding key from that file.
+#   Each section is a list — add, remove, or reorder entries freely.
+# ============================================================================
+# XML builder strategy — controls how XML payloads are generated from CIQ data.
+# Built-in values: "netconf-soi" (Nokia SOI NETCONF-over-CLI, default)
+# To add a new format: implement XmlBuilder, register in XmlBuilderFactory, set name here.
+xmlBuilder: "netconf-soi"
+
+# Default XML namespace applied to all table elements
+defaultNamespace: "http://nokia.com/yang/isbc-sig"
+
+# NETCONF base namespace declared as xmlns:xc on every table element
+netconfNamespace: "http://nokia.com/yang/isbc-sig"
+
+# Additional attributes on the <config> envelope element produced by netconf-soi builder.
+# The "ne" attribute is always added automatically from the NIAM mapping.
+# These are added globally to every table; override per-table under tables.<Name>.configAttributes
+configAttributes:
+  ne-version:  "R24.7"
+  ne-type:     "SBC-signaling"
+  soi-version: "1.0"
+
+# Shell command templates (inherited from SBC_common_blocks.yaml — override if needed)
+# commands:
+#   stageFile:   "cat << 'XMLEOF' > {storageFile}"
+#   heredocEnd:  "XMLEOF"
+#   applyConfig: "netconfprov --onerror abort {storageFile}"
+
+# Temporary storage path on the NE (inherited from SBC_common_blocks.yaml)
+# storagePath: "/storage"
+
+# ============================================================================
+# SECTION 1 — PRE_NODE_HEALTH_CHECK
+# Inherited from SBC_PRE_NODE_HEALTH_CHECK.yaml — no override needed.
+#
+# Validation criteria per command:
+#   cm_adm         : "No outstanding PCS procedures." AND
+#                    "Health check passed, no audit errors were detected." AND
+#                    "Command succeeded!"
+#   virsh list     : every row must have State = "running"
+#   sbc_health     : "chk_all completed successfully" AND
+#                    "CRITI" == 0 for both Media Planes
+#   alarm_check    : "Alarm health check passed"
+#   alarm_cli      : INFO only (no validation)
+#   lcp_status     : "Host info Status" = "ENABLED" for ALL entries AND
+#                    "Service Members Info:" values in
+#                    {ENABLED, ENABLEDUNLOCKED, HOTSTANDBY, NOTRELEVANT}
+#   rem_srv_state  : "Status" = "InserviceActive" or "InserviceStbyHot" for ALL AND
+#                    "REMc" is Active or Stby
+# ============================================================================
+# preNodeHealthCheck: (inherited from SBC_PRE_NODE_HEALTH_CHECK.yaml)
+
+includes:
+  - "SBC_PRE_NODE_HEALTH_CHECK.yaml"
+# ============================================================================
+# SECTION 2 — BACKUP
+# Creates a configuration backup before making changes.
+# ============================================================================
+backup:
+  - name: "BACKUP"
+    description: "Back up current node configuration before making changes"
+    targetNode: "OAM_NODE"
+    method: CLI
+    commands:
+      - "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane signaling --user root --pemfile /root/.ssh/id_rsa --readall > /storage/Signaling_<Hostname>_<DATE>.xml"
+      - "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane media --user root --pemfile /root/.ssh/id_rsa --readall --mediaid 1 > /storage/MGW01_<Hostname>_<DATE>.xml"
+      - "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane media --user root --pemfile /root/.ssh/id_rsa --readall --mediaid 2 > /storage/MGW02_<Hostname>_<DATE>.xml"
+
+# ============================================================================
+# SECTION 3 — ACTIVITY
+#   precheck      — runs before all ACTIVITY_CONFIGURATION blocks
+#   configuration — ordered list of tables to generate ACTIVITY_CONFIGURATION
+#                   blocks for.  Remove a table to skip it; reorder to change
+#                   the sequence.  If omitted, all CIQ tables are used.
+#   postcheck     — runs after  all ACTIVITY_CONFIGURATION blocks
+# ============================================================================
+activity:
+  precheck:
+    - name: "ACTIVITY_PRECHECK"
+      description: "Capture pre-activity baseline state for comparison after configuration"
+      targetNode: "OAM_NODE"
+      method: CLI
+      commands:
+        - "show status"
+        - "show alarms active"
+        - "show crf target-list summary"
+        - "show peering-sdp-profile summary"
+        - "show ibcf virtual-network summary"
+        - "show ibcf trunk-group summary"
+        - "show published-realm summary"
+
+  # -----------------------------------------------------------------------
+  # Per-table precheck (auto-generated, one block per configured table).
+  #
+  # Inserted after the static precheck block(s) above, before any
+  # ACTIVITY_CONFIGURATION block.
+  #
+  # Placeholders available in all command templates:
+  #   {tableName}   - CIQ table name (e.g. CRFTargetList)
+  #   {storagePath} - global storagePath value (e.g. /storage)
+  #   {keyTag}      - XML tag of the primary key field (auto-detected)
+  #   {keyValue}    - primary key value for this record
+  #   {action}      - CREATE, DELETE, or MODIFY
+  # -----------------------------------------------------------------------
+  tablePrecheck:
+    enabled: true
+    targetNode: "OAM_NODE"
+
+    # Step 1 — Download current table configuration from the NE
+    downloadCommand: "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane signaling --user root --pemfile /root/.ssh/id_rsa --table {tableName} --read > {storagePath}/{tableName}_current.xml"
+
+    # Step 2a — For CREATE rows: record must NOT already exist
+    createCheckCommand: "! grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_current.xml || echo \"PRECHECK FAIL: {tableName} {keyTag}={keyValue} already exists (cannot CREATE)\""
+
+    # Step 2b — For DELETE/MODIFY rows: record MUST already exist
+    existsCheckCommand: "grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_current.xml || echo \"PRECHECK FAIL: {tableName} {keyTag}={keyValue} not found (required for {action})\""
+
+  configuration:
+    - CRFTargetList
+  # Target node for all auto-generated ACTIVITY_CONFIGURATION blocks
+  configurationTargetNode: "OAM_NODE"
+
+  # -----------------------------------------------------------------------
+  # Per-table postcheck (auto-generated, one block per configured table).
+  #
+  # Inserted after all ACTIVITY_CONFIGURATION blocks, before the static
+  # ACTIVITY_POSTCHECK block.  Logic is the inverse of tablePrecheck:
+  #   CREATE  → record MUST now exist
+  #   DELETE  → record must NO LONGER exist
+  #   MODIFY/MOD → each field value must match CIQ data
+  #   MODIFY/ADD → sub-record key must now exist
+  #   MODIFY/DEL → sub-record key must no longer exist
+  #
+  # Placeholders available in all command templates:
+  #   {tableName}   - CIQ table name (e.g. CRFTargetList)
+  #   {storagePath} - global storagePath value (e.g. /storage)
+  #   {keyTag}      - XML tag of the primary key (or sub-record key for ADD/DEL)
+  #   {keyValue}    - key value for this record / sub-record
+  #   {fieldTag}    - XML tag of the field being verified (modFieldCheckCommand only)
+  #   {fieldValue}  - expected field value (modFieldCheckCommand only)
+  #   {action}      - CREATE, DELETE, or MODIFY
+  # -----------------------------------------------------------------------
+  tablePostcheck:
+    enabled: true
+    targetNode: "OAM_NODE"
+
+    # Step 1 — Re-download table configuration after changes were applied
+    downloadCommand: "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane signaling --user root --pemfile /root/.ssh/id_rsa --table {tableName} --read > {storagePath}/{tableName}_post.xml"
+
+    # Step 2a — CREATE: record must now exist
+    createCheckCommand: "grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_post.xml || echo \"POSTCHECK FAIL: {tableName} {keyTag}={keyValue} not found after CREATE\""
+
+    # Step 2b — DELETE: record must no longer exist
+    deleteCheckCommand: "! grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_post.xml || echo \"POSTCHECK FAIL: {tableName} {keyTag}={keyValue} still exists after DELETE\""
+
+    # Step 2c — MODIFY/MOD: each field value must match CIQ data (emitted once per field)
+    modFieldCheckCommand: "grep -q \"<{fieldTag}>{fieldValue}</{fieldTag}>\" {storagePath}/{tableName}_post.xml || echo \"POSTCHECK FAIL: {tableName} {keyTag}={keyValue} field {fieldTag} mismatch\""
+
+    # Step 2d — MODIFY/ADD: sub-record key must now exist
+    subAddCheckCommand: "grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_post.xml || echo \"POSTCHECK FAIL: {tableName} sub-record {keyTag}={keyValue} not found after ADD\""
+
+    # Step 2e — MODIFY/DEL: sub-record key must no longer exist
+    subDelCheckCommand: "! grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_post.xml || echo \"POSTCHECK FAIL: {tableName} sub-record {keyTag}={keyValue} still exists after DEL\""
+
+  postcheck:
+    - name: "ACTIVITY_POSTCHECK"
+      description: "Verify configuration was applied successfully and no alarms were raised"
+      targetNode: "OAM_NODE"
+      method: CLI
+      commands:
+        - "show alarms active"
+        - "show crf target-list summary"
+        - "show peering-sdp-profile summary"
+        - "show ibcf virtual-network summary"
+        - "show ibcf trunk-group summary"
+        - "show published-realm summary"
+
+# ============================================================================
+# SECTION 4 — POST_NODE_HEALTH_CHECK
+# Final health check after all configuration changes.
+# ============================================================================
+postNodeHealthCheck:
+  - name: "POST_NODE_HEALTH_CHECK"
+    description: "Verify node health after configuration — compare against pre-check baseline"
+    method: CLI
+    commands:
+      # Execute Post-Node Health check only if any configuration is done on SBC node
+      - "cm_adm -a health"           # Compare Pre and Post and check for deviation
+      - "virsh list --all"           # Compare Pre and Post and check for deviation
+      - "sbc_health --test all"      # Compare Pre and Post and check for deviation
+      - "alarm_check --action health" # Compare Pre and Post and check for deviation
+      - "alarm_cli --list all"       # INFO
+      - "lcp_status"                 # Compare Pre and Post and check for deviation
+      - "rem_srv_state --action display --set all" # Compare Pre and Post and check for deviation
+
+# ============================================================================
+# SECTION 5 — ROLLBACK
+# 5a. ROLLBACK_PRECHECK   — verifies node state before rollback
+# 5b. ROLLBACK_CONFIGURATION — ordered list of tables to generate DELETE XML
+#                              blocks for.  Only tables that had CREATE rows
+#                              in the CIQ data will produce actual blocks.
+#                              Remove a table to skip its rollback.
+# 5c. ROLLBACK_POSTCHECK  — verifies rollback completed successfully
+# ============================================================================
+rollback:
+  precheck:
+    - name: "ROLLBACK_PRECHECK"
+      description: "Verify node state before initiating rollback"
+      targetNode: "OAM_NODE"
+      method: CLI
+      commands:
+        - "show status"
+        - "show alarms active"
+        - "show crf target-list summary"
+        - "show ibcf virtual-network summary"
+
+  # -----------------------------------------------------------------------
+  # Per-table rollback precheck — runs BEFORE ROLLBACK_CONFIGURATION.
+  # Verifies that CREATE records still exist on the NE (ready to be deleted).
+  # Uses existsCheckCommand only (rollback only deletes CREATEd records).
+  # -----------------------------------------------------------------------
+  tablePrecheck:
+    enabled: true
+    targetNode: "OAM_NODE"
+    downloadCommand: "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane signaling --user root --pemfile /root/.ssh/id_rsa --table {tableName} --read > {storagePath}/{tableName}_rollback_pre.xml"
+    existsCheckCommand: "grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_rollback_pre.xml || echo \"ROLLBACK PRECHECK FAIL: {tableName} {keyTag}={keyValue} not found (required for ROLLBACK)\""
+
+  configuration:
+    - CRFTargetList
+  # Target node for all auto-generated ROLLBACK_CONFIGURATION blocks
+  configurationTargetNode: "OAM_NODE"
+
+  # -----------------------------------------------------------------------
+  # Per-table rollback postcheck — runs AFTER ROLLBACK_CONFIGURATION.
+  # Verifies that CREATE records have been successfully deleted from the NE.
+  # Uses deleteCheckCommand only (rollback only deletes CREATEd records).
+  # -----------------------------------------------------------------------
+  tablePostcheck:
+    enabled: true
+    targetNode: "OAM_NODE"
+    downloadCommand: "/opt/sbc/CurrRel/scripts/netconfprov/netconfprov --plane signaling --user root --pemfile /root/.ssh/id_rsa --table {tableName} --read > {storagePath}/{tableName}_rollback_post.xml"
+    deleteCheckCommand: "! grep -q \"<{keyTag}>{keyValue}</{keyTag}>\" {storagePath}/{tableName}_rollback_post.xml || echo \"ROLLBACK POSTCHECK FAIL: {tableName} {keyTag}={keyValue} still exists after ROLLBACK\""
+
+  postcheck:
+    - name: "ROLLBACK_POSTCHECK"
+      description: "Verify rollback completed successfully and node is back to baseline state"
+      targetNode: "OAM_NODE"
+      method: CLI
+      commands:
+        - "show status"
+        - "show alarms active"
+        - "show crf target-list summary"
+        - "show ibcf virtual-network summary"
+
+# ============================================================================
+# Per-table XML configuration
+#
+# Auto-derive rules apply when no mapping is specified:
+#   Record.FIELD          -> <FIELD>value</FIELD>
+#   Record.SubTable.FIELD -> <SubTable><FIELD>value</FIELD></SubTable>
+#
+# columnMappings: specify only when you need to rename a CIQ column
+# to a different XML tag name.  Keys are full CIQ column paths from the JSON.
+# Sub-table element name is keyed as "Record.SubTableName" (no field suffix).
+# ============================================================================
+tables:
+
+  # ---------- CRFTargetList -------------------------------------------------
+  # Columns from: SBC_FIXED_LINE_CONFIGURATION_CRFTargetList.json
+  CRFTargetList:
+    namespace: "http://nokia.com/yang/isbc-sig"
+    xmlElement: "CRFTargetList"
+    recordElement: "Record"
+    columnMappings:
+      # depth-1 fields
+      "Record.TARGET_LIST_ID":               "TARGET_LIST_ID"
+      "Record.DESCRIPTION":                  "DESCRIPTION"
+      "Record.LOCATION":                     "LOCATION"
+      "Record.TARGET_TYPE":                  "TARGET_TYPE"
+      "Record.TARGET_LIST_SELECTION_OPTION": "TARGET_LIST_SELECTION_OPTION"
+      # sub-table element name
+      "Record.CRFTargetListEntry":           "CRFTargetListEntry"
+      # depth-2 fields inside CRFTargetListEntry
+      "Record.CRFTargetListEntry.TARGET_ID":      "TARGET_ID"
+      "Record.CRFTargetListEntry.VN_ID":          "VN_ID"
+      "Record.CRFTargetListEntry.TG_ID":          "TG_ID"
+      "Record.CRFTargetListEntry.ORDER":          "ORDER"
+      "Record.CRFTargetListEntry.PRIORITY":       "PRIORITY"
+      "Record.CRFTargetListEntry.WEIGHT":         "WEIGHT"
+      "Record.CRFTargetListEntry.COST_TBL_INDEX": "COST_TBL_INDEX"
+
+    # -----------------------------------------------------------------------
+    # XML templates — define the exact XML structure for each action.
+    # Placeholders: ${Record.FIELD}, ${subrecords.SubTableName},
+    #               ${ne}, ${namespace}, ${netconfNamespace}, ${records},
+    #               and any configAttributes key (e.g. ${ne-version}).
+    # Actions without a template fall back to programmatic XML generation.
+    # -----------------------------------------------------------------------
+    xmlTemplates:
+
+      create:
+        envelope: |
+          <?xml version="1.0" encoding="UTF-8"?>
+          <config ne="${ne}" ne-version="${ne-version}" ne-type="${ne-type}" soi-version="${soi-version}">
+            <CRFTargetList xmlns="${namespace}" xmlns:xc="${netconfNamespace}">
+                ${records}
+            </CRFTargetList>
+          </config>
+        record: |
+              <Record xc:operation="create">
+                <TARGET_LIST_ID>${Record.TARGET_LIST_ID}</TARGET_LIST_ID>
+                <DESCRIPTION>${Record.DESCRIPTION}</DESCRIPTION>
+                <LOCATION>${Record.LOCATION}</LOCATION>
+                <TARGET_TYPE>${Record.TARGET_TYPE}</TARGET_TYPE>
+                <TARGET_LIST_SELECTION_OPTION>${Record.TARGET_LIST_SELECTION_OPTION}</TARGET_LIST_SELECTION_OPTION>
+                   ${subrecords.CRFTargetListEntry}
+              </Record>
+        subRecords:
+          CRFTargetListEntry: |
+                <CRFTargetListEntry>
+                  <TARGET_ID>${Record.CRFTargetListEntry.TARGET_ID}</TARGET_ID>
+                  <VN_ID>${Record.CRFTargetListEntry.VN_ID}</VN_ID>
+                  <TG_ID>${Record.CRFTargetListEntry.TG_ID}</TG_ID>
+                  <ORDER>${Record.CRFTargetListEntry.ORDER}</ORDER>
+                  <PRIORITY>${Record.CRFTargetListEntry.PRIORITY}</PRIORITY>
+                  <WEIGHT>${Record.CRFTargetListEntry.WEIGHT}</WEIGHT>
+                  <COST_TBL_INDEX>${Record.CRFTargetListEntry.COST_TBL_INDEX}</COST_TBL_INDEX>
+                </CRFTargetListEntry>
+
+      delete:
+        envelope: |
+          <?xml version="1.0" encoding="UTF-8"?>
+          <config ne="${ne}" ne-version="${ne-version}" ne-type="${ne-type}" soi-version="${soi-version}">
+            <CRFTargetList xmlns="${namespace}" xmlns:xc="${netconfNamespace}">
+                ${records}
+            </CRFTargetList>
+          </config>
+        record: |
+              <Record xc:operation="delete">
+                <TARGET_LIST_ID>${Record.TARGET_LIST_ID}</TARGET_LIST_ID>
+              </Record>
+
+      rollback:
+        envelope: |
+          <?xml version="1.0" encoding="UTF-8"?>
+          <config ne="${ne}" ne-version="${ne-version}" ne-type="${ne-type}" soi-version="${soi-version}">
+            <CRFTargetList xmlns="${namespace}"  xmlns:xc="${netconfNamespace}">
+                 ${records}
+            </CRFTargetList>
+          </config>
+        record: |
+           <Record xc:operation="delete">
+             <TARGET_LIST_ID>${Record.TARGET_LIST_ID}</TARGET_LIST_ID>
+           </Record>
+

@@ -1,0 +1,183 @@
+# ============================================================================
+# MOP Template: MRF - ANNOUNCEMENT_LOADING
+# Naming convention: {NODE_TYPE}_{ACTIVITY}_MOP-Template.yaml
+#
+# Use-case: Load announcement audio files (TAR or individual) onto MRF nodes.
+# Mode: Static CLI — no CIQ-driven XML generation.
+#       All configuration blocks are defined explicitly under 'execution'.
+#
+# Assumptions:
+#   - Announcement files are uploaded to the Repository server before ordering.
+#   - ANN_DIR = /var/opt/swms/clips/persistent/provisioned/audioclips/<CIRCLE>/PREPAID/
+#   - Login to NE is performed via NIAM (CTRL+P+E to switch to root).
+# ============================================================================
+
+# No XML generation needed for this activity — omit xmlBuilder, defaultNamespace,
+# netconfNamespace, configAttributes, and tables sections entirely.
+
+# ============================================================================
+# CONSTANTS
+# Named values substituted into every command at MOP generation time.
+# Reference a constant anywhere in commands using $KEY syntax.
+# ============================================================================
+constants:
+  ANN_DIR:  "/var/opt/swms/clips/persistent/provisioned/audioclips/${CIRCLE}/PREPAID"
+ 
+# MOP generation mode (per GROUP within a CRGROUP):
+#   GROUP — one shared MOP per GROUP: <base>_<group>_MOP.<ext>
+#   NODE  — one MOP per node:         <base>_<node>_MOP.<ext>
+mopGenerationMode: NODE
+
+# Approval document format:
+#   TEXT    — no separate approval doc; the MOP file itself is used for approval
+#   HTML    — generates an HTML approval document
+#   MSWORD  — generates a .docx MS Word approval document
+# Approval summary is always one per CRGROUP: <base>_<crgroup>_SUMMARY.<ext>
+mopApprovalFormatType: HTML
+# ============================================================================
+# SECTION 1 — PRE_NODE_HEALTH_CHECK
+# ============================================================================
+preNodeHealthCheck:
+  - name: "PRE_NODE_HEALTH_CHECK"
+    description: "Verify MRF node health before announcement loading"
+    targetNode: "MRF_NODE"
+    method: CLI
+    commands:
+      - cmd: "CTRL+P+E"                # Switch to Privilege Mode
+        description: "Switch to Privilege Mode"
+        validation: "Output should contain text 'Privilege Escalation successful.'"
+      - cmd: "date"                    # INFO
+        description: "Prints System Date"
+        validation: "Info Only"
+      - cmd: "time"                    # INFO
+        description: "Prints System Time"
+        validation: "Info Only"
+      - cmd: "service swms status"     # Validate: service must be running
+        description: "Verify SWMS services are running before loading files"
+        validation: "Output must show 'active (running)'"
+
+# ============================================================================
+# SECTION 2 — BACKUP
+# Back up existing announcement files so rollback can restore them.
+# ============================================================================
+backup:
+  - name: "BACKUP"
+    description: "Back up existing announcement files before loading new ones"
+    targetNode: "MRF_NODE"
+    method: CLI
+    commands:
+      - "ls -lrth ${MRF_DESTINATION_PATH}"
+      - "mkdir -p /tmp/${VERSION}/"
+      - "cp -rp ${MRF_DESTINATION_PATH}/* /tmp/${VERSION}/"
+
+# ============================================================================
+# SECTION 3 — ACTIVITY
+# 3a. ACTIVITY_PRECHECK   — baseline state before loading
+# 3b. ACTIVITY_EXECUTION  — file transfer and loading (static CLI)
+# 3c. ACTIVITY_POSTCHECK  — verify files loaded with correct permissions
+# ============================================================================
+activity:
+
+  # --------------------------------------------------------------------------
+  # 3a. ACTIVITY_PRECHECK
+  # --------------------------------------------------------------------------
+  precheck:
+    - name: "ACTIVITY_PRECHECK"
+      description: "Capture pre-activity state of announcement directory"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+        - "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"${INPUT_FILE}\""
+
+  # --------------------------------------------------------------------------
+  # 3b. ACTIVITY_EXECUTION  (static CLI mode — no 'configuration' list needed)
+  # Transfer announcement files and load them into the announcement directory.
+  # --------------------------------------------------------------------------
+  execution:
+    - name: "TRANSFER_ANNOUNCEMENT_FILES"
+      description: "SFTP announcement files (TAR or individual) to /tmp on MRF"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+        - "# SFTP the announcement file(s) relevant for this MRF to /tmp"
+        - "sftp /<SOURCE_DIR>  /tmp/${INPUT_FILE}"
+
+    - name: "LOAD_ANNOUNCEMENT_FILES"
+      description: "Copy announcement files to announcement directory and set permissions"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+        - if: "${VERSION} == 13.X.X.X" # matches regex i.e X means anything. check docs for exact usage
+          then: # Copy individual files from untar folder
+            - "cp -r /tmp/${INPUT_FILE | stripExt}/* ${MRF_DESTINATION_PATH}"
+            - "chmod 777 ${MRF_DESTINATION_PATH}"
+          else: # Untar directly to announcement directory
+            - "tar -xf /tmp/${INPUT_FILE} -C ${MRF_DESTINATION_PATH}"
+            - "chmod 777 ${MRF_DESTINATION_PATH}"
+
+  # --------------------------------------------------------------------------
+  # 3c. ACTIVITY_POSTCHECK
+  # --------------------------------------------------------------------------
+  postcheck:
+    - name: "ACTIVITY_POSTCHECK"
+      description: "Verify announcement files copied correctly with right permissions"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+        - "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"/${INPUT_FILE | stripExt}\"" #Check files and there permission should -rwxrwxrwx
+
+# ============================================================================
+# SECTION 4 — POST_NODE_HEALTH_CHECK
+# ============================================================================
+postNodeHealthCheck:
+  - name: "POST_NODE_HEALTH_CHECK"
+    description: "Verify MRF node health after announcement loading"
+    targetNode: "MRF_NODE"
+    method: CLI
+    commands:
+      - "service swms status"     # Validate: service must still be running
+      
+
+# ============================================================================
+# SECTION 5 — ROLLBACK
+# 5a. ROLLBACK_PRECHECK   — verify backup exists before restoring
+# 5b. ROLLBACK_EXECUTION  — restore backup or remove newly loaded files
+# 5c. ROLLBACK_POSTCHECK  — verify announcement directory state after rollback
+# ============================================================================
+rollback:
+
+  # --------------------------------------------------------------------------
+  # 5a. ROLLBACK_PRECHECK
+  # --------------------------------------------------------------------------
+  precheck:
+    - name: "ROLLBACK_PRECHECK"
+      description: "Verify backup exists and node state before rollback"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+        - "CTRL+P+E"
+        - "ls -lrth /tmp/${VERSION}" # Confirm backup is present
+        
+  # --------------------------------------------------------------------------
+  # 5b. ROLLBACK_EXECUTION  (static CLI mode — no 'configuration' list needed)
+  # Restore backup if it exists; otherwise remove the newly loaded files.
+  # --------------------------------------------------------------------------
+  execution:
+    - name: "ROLLBACK_ANNOUNCEMENT_FILES"
+      description: "Restore announcement files from backup or remove new files"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+       - "cp -r /tmp/${VERSION}/*  ${MRF_DESTINATION_PATH}"  #Restore the backup file in ${MRF_DESTINATION_PATH}
+       - "rm -f ${MRF_DESTINATION_PATH}/*" #Remove the announcement file from ${MRF_DESTINATION_PATH}
+
+  # --------------------------------------------------------------------------
+  # 5c. ROLLBACK_POSTCHECK
+  # --------------------------------------------------------------------------
+  postcheck:
+    - name: "ROLLBACK_POSTCHECK"
+      description: "Verify rollback completed and announcement directory is restored"
+      targetNode: "MRF_NODE"
+      method: CLI
+      commands:
+        - "ls -lrth ${MRF_DESTINATION_PATH}"

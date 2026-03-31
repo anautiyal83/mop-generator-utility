@@ -1,0 +1,204 @@
+# ============================================================================
+# MOP Template: DPA - UPDATE_HANDSET_DETAILS
+# Naming convention: {NODE_TYPE}_{ACTIVITY}_MOP-Template.yaml
+#
+# Use-case: Update new handset device details (TAC codes) via DLU phones.dat
+#           file on both DPA nodes in a region.
+# Mode: Static CLI — no CIQ-driven XML generation.
+#       All configuration blocks are defined explicitly under 'execution'.
+#
+# Assumptions:
+#   - Latest phones.dat is downloaded from website and uploaded to SharePoint.
+#   - User privilege: Admin (Nm-user0).
+#   - Login: connect via NIAM, then su - ntms (same password across Bharti DPA nodes).
+# ============================================================================
+
+# No XML generation needed for this activity — omit xmlBuilder, defaultNamespace,
+# netconfNamespace, configAttributes, and tables sections entirely.
+
+# ============================================================================
+# SECTION 1 — PRE_NODE_HEALTH_CHECK
+# ============================================================================
+preNodeHealthCheck:
+  - name: "PRE_NODE_HEALTH_CHECK"
+    description: "Verify DPA node health and validate required files are present"
+    targetNode: "DPA_NODE"
+    method: CLI
+    commands:
+      - "su - ntms"                                                            # Switch to ntms user
+      - "ls -ltrh /export/home/users/ntms/tools/phoneimport"                   # Validate: phones.dat and phoneimporter.log present
+      - "ls -ltrh /export/home/users/ntms/dpa/dwh/logs/PHONES"                 # Validate: application logs running
+      - "date"                                                                   # INFO
+      - "df -kh"                                                                 # INFO
+      - "df -i"                                                                  # INFO
+      - "free -g"                                                                # INFO
+      - "ps -ef | grep dpa"                                                      # INFO
+      - "uptime"                                                                 # INFO
+      - "top -bn1 | head -20"                                                    # INFO
+
+# ============================================================================
+# SECTION 2 — BACKUP
+# Back up current phones.dat using the current DLU version as suffix.
+# ============================================================================
+backup:
+  - name: "BACKUP"
+    description: "Back up current phones.dat before replacing with new version"
+    targetNode: "DPA_NODE"
+    method: CLI
+    commands:
+      - "cd /export/home/users/ntms/tools/phoneimport"
+      - "tail -20 phoneimporter.log"                                             # Retrieve current DLU version (e.g. 226) after 'DLU' string
+      - "cp -p phones.dat ./OldDLUBKP/phones.dat_bkp$DLU_VERSION"              # Store backup; note filename for rollback
+
+# ============================================================================
+# SECTION 3 — ACTIVITY
+# 3a. ACTIVITY_PRECHECK   — capture current DLU version as baseline
+# 3b. ACTIVITY_EXECUTION  — copy new phones.dat and trigger import (static CLI)
+# 3c. ACTIVITY_POSTCHECK  — verify new DLU version matches CIQ value
+# ============================================================================
+activity:
+
+  # --------------------------------------------------------------------------
+  # 3a. ACTIVITY_PRECHECK
+  # --------------------------------------------------------------------------
+  precheck:
+    - name: "ACTIVITY_PRECHECK"
+      description: "Capture current DLU version before phones.dat update"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "tail -20 phoneimporter.log"                                           # Record current DLU version for comparison
+
+  # --------------------------------------------------------------------------
+  # 3b. ACTIVITY_EXECUTION  (static CLI mode — no 'configuration' list needed)
+  # Download new phones.dat, copy to phoneimport directory, import, and start loader.
+  # --------------------------------------------------------------------------
+  execution:
+    - name: "DEPLOY_PHONES_DAT"
+      description: "Copy new phones.dat from SharePoint to phoneimport directory"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /tmp"
+        - "# Download latest phones.dat from SharePoint folder to /tmp"
+        - "cp -p $NEW_FILE_NAME /export/home/users/ntms/tools/phoneimport/phones.dat"
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "ls -ls phones.dat"
+        - "# Validate permission/ownership: -rw-r--r-- 1 ntms ntms"
+        - "# If ownership incorrect:  chown ntms:ntms phones.dat"
+        - "# If permission incorrect: chmod 644 phones.dat"
+
+    - name: "IMPORT_PHONES_DAT"
+      description: "Run importtodpa.sh to import new phones.dat and verify DLU version"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "sudo ./importtodpa.sh"
+        - "tail -20 phoneimporter.log"                                           # Retrieve new DLU version — must match CIQ value
+        - "# If new version != CIQ value: ERROR — raise ticket for further action"
+
+    - name: "START_PHONES_LOADER"
+      description: "Start PHONES loader if startLoader.sh is present on this DPA node"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "ls -ls /export/home/users/ntms/dpa/dwh/etl/bin/startLoader.sh"       # Present on one of the two DPA nodes only
+        - "# If file exists: run the loader"
+        - "/export/home/users/ntms/dpa/dwh/etl/bin/startLoader.sh PHONES"
+        - "cd /export/home/users/ntms/dpa/dwh/logs/PHONES"
+        - "ls -lrth | tail"                                                      # Identify log file for current date
+        - "tail -f loader_$DATE.log"                                             # Monitor TAC count
+
+  # --------------------------------------------------------------------------
+  # 3c. ACTIVITY_POSTCHECK
+  # --------------------------------------------------------------------------
+  postcheck:
+    - name: "ACTIVITY_POSTCHECK"
+      description: "Verify phones.dat updated successfully and DLU version matches CIQ"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "ls -ls phones.dat"
+        - "tail -20 phoneimporter.log"                                           # Verify new DLU version
+
+# ============================================================================
+# SECTION 4 — POST_NODE_HEALTH_CHECK
+# Execute only if phones.dat was updated on this DPA node.
+# ============================================================================
+postNodeHealthCheck:
+  - name: "POST_NODE_HEALTH_CHECK"
+    description: "Verify DPA node health after phones.dat update"
+    targetNode: "DPA_NODE"
+    method: CLI
+    commands:
+      - "date"                                                                   # INFO
+      - "df -kh"                                                                 # INFO
+      - "df -i"                                                                  # INFO
+      - "free -g"                                                                # INFO
+      - "ps -ef | grep dpa"                                                      # INFO
+      - "uptime"                                                                 # INFO
+      - "top -bn1 | head -20"                                                    # INFO
+
+# ============================================================================
+# SECTION 5 — ROLLBACK
+# 5a. ROLLBACK_PRECHECK   — retrieve current version before restoring backup
+# 5b. ROLLBACK_EXECUTION  — restore backup phones.dat and re-run import
+# 5c. ROLLBACK_POSTCHECK  — verify rollback DLU version differs from current
+# ============================================================================
+rollback:
+
+  # --------------------------------------------------------------------------
+  # 5a. ROLLBACK_PRECHECK
+  # --------------------------------------------------------------------------
+  precheck:
+    - name: "ROLLBACK_PRECHECK"
+      description: "Capture current DLU version before restoring backup phones.dat"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "tail -20 phoneimporter.log"                                           # Record current (new) DLU version
+
+  # --------------------------------------------------------------------------
+  # 5b. ROLLBACK_EXECUTION  (static CLI mode — no 'configuration' list needed)
+  # Restore backup phones.dat, re-import, and restart loader.
+  # --------------------------------------------------------------------------
+  execution:
+    - name: "RESTORE_PHONES_DAT"
+      description: "Restore backup phones.dat and re-run importtodpa.sh"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "cp -p ./OldDLUBKP/phones.dat_bkp$DLU_VERSION phones.dat"
+        - "sudo ./importtodpa.sh"
+        - "tail -20 phoneimporter.log"                                           # Retrieve rollback DLU version
+        - "# If rollback version == current version: ERROR — rollback did not happen"
+
+    - name: "RESTART_PHONES_LOADER_ROLLBACK"
+      description: "Restart PHONES loader after rollback if startLoader.sh is present"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "ls -ls /export/home/users/ntms/dpa/dwh/etl/bin/startLoader.sh"
+        - "# If file exists:"
+        - "/export/home/users/ntms/dpa/dwh/etl/bin/startLoader.sh PHONES"
+        - "cd /export/home/users/ntms/dpa/dwh/logs/PHONES"
+        - "ls -lrth | tail"
+        - "tail -f loader_$DATE.log"                                             # Verify TAC count after rollback
+
+  # --------------------------------------------------------------------------
+  # 5c. ROLLBACK_POSTCHECK
+  # --------------------------------------------------------------------------
+  postcheck:
+    - name: "ROLLBACK_POSTCHECK"
+      description: "Verify rollback completed and DLU version is back to backup version"
+      targetNode: "DPA_NODE"
+      method: CLI
+      commands:
+        - "cd /export/home/users/ntms/tools/phoneimport"
+        - "ls -ls phones.dat"
+        - "tail -20 phoneimporter.log"                                           # Confirm rollback DLU version
