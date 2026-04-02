@@ -415,19 +415,62 @@ Conditions are evaluated using group-level variable values (consistent across al
 
 ---
 
+## Per-command description and validation
+
+Each command in any activity block can be annotated with a human-readable description and an expected validation outcome. Use the rich entry form instead of a plain string:
+
+```yaml
+execution:
+  - name: "LOAD_ANNOUNCEMENT_FILES"
+    description: "Copy announcement files to MRF and set permissions"
+    targetNode: "MRF_NODE"
+    method: CLI
+    commands:
+      - cmd: "cp /tmp/$ANN_FILE $ANN_DIR"
+        description: "Copy tar archive to announcement directory"
+        validation: "No error output; exit code 0"
+      - cmd: "chmod 777 $ANN_DIR/$ANN_FILE"
+        description: "Set full permissions on the archive"
+        validation: "ls -la shows rwxrwxrwx"
+      - "ls -la $ANN_DIR"            # plain string — no metadata
+```
+
+Plain strings and rich entries can be mixed freely in the same `commands` list.
+
+**What appears where:**
+
+| Field | MOP file | Approval summary |
+|---|---|---|
+| `cmd` / plain string | Written as-is | Written as-is |
+| `description` | NOT written | Shown in table column |
+| `validation` | NOT written | Shown in table column |
+
+Metadata is stored in a sidecar `<mop>.meta.json` file alongside the generated MOP. The approval generator reads this file to populate the summary table. The MOP itself stays clean.
+
+When any command in a section has metadata, the whole section's command list switches from a `<pre>` block to a table with **#**, **Command**, **Description**, **Validation** columns. Sections without metadata still render as a plain code block.
+
+---
+
 ## Approval Summary
 
 When `mopApprovalFormatType` is `HTML` or `MSWORD`, an approval document is generated alongside the MOP files.
 
 The HTML summary structure:
 - **Page header** — node type, activity, group/CRGROUP, generated timestamp
-- **APPROVAL COPY** banner
-- **Node list** — nodes the MOP will be executed on
-- **Table of contents** — Activity phases and Rollback phases (nested)
-- **Activity** section — each phase as a sub-heading with commands
-- **Rollback** section — each rollback phase as a sub-heading with commands
+- **APPROVAL COPY** watermark banner
+- **Node list** — all nodes the MOP will be executed on
+- **Table of contents** — Activity phases (numbered list) + Rollback phases (numbered list)
+- **Activity** heading — each MOP block as a numbered sub-heading, showing:
+  - Target node, method badge, action type badge (CREATE / MODIFY / DELETE / ROLLBACK)
+  - Block `description` as an italic paragraph (when defined in YAML)
+  - Commands — plain `<pre>` block, or table with Description/Validation columns when metadata is present
+- **Rollback** heading — same structure for rollback blocks
 
-For CRGROUP mode, the summary spans all GROUPs in the CR, showing each GROUP's nodes and MOP sections.
+Blocks that have no `typeMarker` (static phases like PRE_NODE_HEALTH_CHECK, BACKUP) show no action badge — just the block name, target, and method.
+
+For CRGROUP mode, the summary spans all GROUPs in the CR, showing each GROUP's nodes and MOP sections side by side.
+
+**Sidecar metadata file:** For each generated MOP, the approval generator also reads `<mop>.meta.json` (written by the MOP generator) to obtain per-command description/validation. If the file does not exist, commands are displayed without metadata.
 
 ---
 

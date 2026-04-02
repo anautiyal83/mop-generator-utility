@@ -21,7 +21,7 @@
 # Reference a constant anywhere in commands using $KEY syntax.
 # ============================================================================
 constants:
-  ANN_DIR:  "/var/opt/swms/clips/persistent/provisioned/audioclips/${CIRCLE}/PREPAID"
+  #ANN_DIR:  "/var/opt/swms/clips/persistent/provisioned/audioclips/${CIRCLE}/PREPAID"
  
 # MOP generation mode (per GROUP within a CRGROUP):
 #   GROUP — one shared MOP per GROUP: <base>_<group>_MOP.<ext>
@@ -66,9 +66,15 @@ backup:
     targetNode: "MRF_NODE"
     method: CLI
     commands:
-      - "ls -lrth ${MRF_DESTINATION_PATH}"
-      - "mkdir -p /tmp/${VERSION}/"
-      - "cp -rp ${MRF_DESTINATION_PATH}/* /tmp/${VERSION}/"
+     - cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
+       description: "Display Files and folders in the announcement directory"
+       validation: "Validate that files and folders exists in the announcement directory "
+     - cmd: "mkdir -p /tmp/${VERSION}/"
+       description: "Creates temp directory with the MRF version"
+       validation: "Validate that a mkdir command is executed successfully, with no errors"
+     - cmd: "cp -rp ${MRF_DESTINATION_PATH}/* /tmp/${VERSION}/"
+       description: "Copy all files and folders from announcement directory to temp directory"
+       validation: "Validate that a cp command is executed successfully, with no errors"
 
 # ============================================================================
 # SECTION 3 — ACTIVITY
@@ -87,7 +93,9 @@ activity:
       targetNode: "MRF_NODE"
       method: CLI
       commands:
-        - "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"${INPUT_FILE}\""
+        - cmd: "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"${INPUT_FILE}\""
+          description: "List all the files in announcement directory with files name matching input file"
+          validation: "Validate if input file already exists in announcement directory"
 
   # --------------------------------------------------------------------------
   # 3b. ACTIVITY_EXECUTION  (static CLI mode — no 'configuration' list needed)
@@ -109,11 +117,19 @@ activity:
       commands:
         - if: "${VERSION} == 13.X.X.X" # matches regex i.e X means anything. check docs for exact usage
           then: # Copy individual files from untar folder
-            - "cp -r /tmp/${INPUT_FILE | stripExt}/* ${MRF_DESTINATION_PATH}"
-            - "chmod 777 ${MRF_DESTINATION_PATH}"
+            - cmd: "cp -r /tmp/${INPUT_FILE | stripExt}/* ${MRF_DESTINATION_PATH}"
+              description: "Copy individual files from untar(temp) folder to announcement directory"
+              validation: "Validate that copy command is executed successfully"           
+            - cmd: "chmod 777 ${MRF_DESTINATION_PATH}"
+              description: "change file permission to 777"
+              validation: "Validate that chmod command is executed successfully"
           else: # Untar directly to announcement directory
-            - "tar -xf /tmp/${INPUT_FILE} -C ${MRF_DESTINATION_PATH}"
-            - "chmod 777 ${MRF_DESTINATION_PATH}"
+            - cmd: "tar -xf /tmp/${INPUT_FILE} -C ${MRF_DESTINATION_PATH}"
+              description: "Untar input file to directly to announcement directory"
+              validation: "Validate that tar command is executed successfully"
+            - cmd: "chmod 777 ${MRF_DESTINATION_PATH}"
+              description: "change file permission to 777"
+              validation: "Validate that chmod command is executed successfully"
 
   # --------------------------------------------------------------------------
   # 3c. ACTIVITY_POSTCHECK
@@ -124,8 +140,9 @@ activity:
       targetNode: "MRF_NODE"
       method: CLI
       commands:
-        - "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"/${INPUT_FILE | stripExt}\"" #Check files and there permission should -rwxrwxrwx
-
+        - cmd: "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"/${INPUT_FILE | stripExt}\""
+          description: "List all the files in announcement directory with same name as input file"
+          validation: "Validate if input file already exists in announcement directory and there permission should -rwxrwxrwx"
 # ============================================================================
 # SECTION 4 — POST_NODE_HEALTH_CHECK
 # ============================================================================
@@ -135,8 +152,9 @@ postNodeHealthCheck:
     targetNode: "MRF_NODE"
     method: CLI
     commands:
-      - "service swms status"     # Validate: service must still be running
-      
+     - cmd: "service swms status"     # Validate: service must be running
+       description: "Verify SWMS services are running before loading files"
+       validation: "Output must show 'active (running)'"      
 
 # ============================================================================
 # SECTION 5 — ROLLBACK
@@ -155,9 +173,13 @@ rollback:
       targetNode: "MRF_NODE"
       method: CLI
       commands:
-        - "CTRL+P+E"
-        - "ls -lrth /tmp/${VERSION}" # Confirm backup is present
-        
+       - cmd: "CTRL+P+E"                # Switch to Privilege Mode
+         description: "Switch to Privilege Mode"
+         validation: "Output should contain text 'Privilege Escalation successful.'"
+       - cmd: "ls -lrth /tmp/${VERSION}" # Confirm backup is present
+         description: "Lists all the files in temp directory with MRF Node version"
+         validation: "Validate if input file backup files(same version name) exists in tmp directory"
+                 
   # --------------------------------------------------------------------------
   # 5b. ROLLBACK_EXECUTION  (static CLI mode — no 'configuration' list needed)
   # Restore backup if it exists; otherwise remove the newly loaded files.
@@ -168,8 +190,12 @@ rollback:
       targetNode: "MRF_NODE"
       method: CLI
       commands:
-       - "cp -r /tmp/${VERSION}/*  ${MRF_DESTINATION_PATH}"  #Restore the backup file in ${MRF_DESTINATION_PATH}
-       - "rm -f ${MRF_DESTINATION_PATH}/*" #Remove the announcement file from ${MRF_DESTINATION_PATH}
+       - cmd: "cp -r /tmp/${VERSION}/*  ${MRF_DESTINATION_PATH}"  
+         description: "Restore or Copy the backup files in announcement directory"
+         validation: "Validate that copy command is executed successfully"
+       - cmd: "rm -f ${MRF_DESTINATION_PATH}/*" 
+         description: "Remove the announcement file from announcement directory"
+         validation: "Validate that rm command is executed successfully"
 
   # --------------------------------------------------------------------------
   # 5c. ROLLBACK_POSTCHECK
@@ -180,4 +206,6 @@ rollback:
       targetNode: "MRF_NODE"
       method: CLI
       commands:
-        - "ls -lrth ${MRF_DESTINATION_PATH}"
+       - cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
+         description: "Lists all the files in announcement directory"
+         validation: "Validate if backup files exists in announcement directory"

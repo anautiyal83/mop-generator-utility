@@ -84,6 +84,13 @@ public class MopGenerator {
      */
     private final List<Map<String, String>> ciqRows = new ArrayList<>();
 
+    /**
+     * Command metadata (description + validation) collected per block during generation.
+     * Written to a sidecar {@code .meta.json} file so the approval summary can render
+     * rich per-command annotations without polluting the actual MOP payload.
+     */
+    private final Map<String, List<MopSection.CommandLine>> sectionMetadata = new LinkedHashMap<>();
+
     public MopGenerator(MopConfig config) {
         this.config = config;
         XmlBuilder base = XmlBuilderFactory.create(config.getXmlBuilderName(), config);
@@ -292,6 +299,7 @@ public class MopGenerator {
         try (Writer w = new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8)) {
             w.write(sb.toString());
         }
+        writeSectionMetadata(outputPath);
         log.info("MOP written: {}", outputPath);
     }
 
@@ -515,6 +523,7 @@ public class MopGenerator {
     private void buildVariableContext(CiqDataStore store, String nodeName, String neId) throws IOException {
         variableContext.clear();
         ciqRows.clear();
+        sectionMetadata.clear();
         if (nodeName != null) variableContext.put("NODE", nodeName);
         if (neId != null)     variableContext.put("NEID", neId);
         for (String tableName : store.getIndex().getAllTables()) {
@@ -595,15 +604,18 @@ public class MopGenerator {
 
     /**
      * Write a block action from a list of {@link CommandEntry} leaf entries.
-     * Entries that have {@code description} or {@code validation} metadata emit
-     * {@code ## cmd-desc:} / {@code ## cmd-validate:} comment lines in the payload
-     * so the approval summary parser can pick them up.
+     * Description and validation metadata are NOT written to the MOP payload;
+     * they are collected in {@link #sectionMetadata} and serialised to a
+     * {@code .meta.json} sidecar file so the approval summary can use them
+     * without polluting the executable MOP.
      */
     private void writeBlockActionEntries(StringBuilder sb, int index, String actionName,
                                          String method, List<CommandEntry> entries) {
         sb.append("ACTIVITY_EXECUTION_ACTION_").append(index).append("=").append(actionName).append("\n");
         sb.append("ACTIVITY_EXECUTION_METHOD_").append(index).append("=").append(method).append("\n");
         sb.append("ACTIVITY_EXECUTION_PAYLOAD_").append(index).append("={\n");
+        List<MopSection.CommandLine> metaLines =
+                sectionMetadata.computeIfAbsent(actionName, k -> new ArrayList<>());
         for (CommandEntry entry : entries) {
             String resolved = resolveVariables(resolveConstants(entry.getText()));
             String desc     = entry.getDescription() != null
@@ -611,19 +623,53 @@ public class MopGenerator {
             String validate = entry.getValidation() != null
                     ? resolveVariables(resolveConstants(entry.getValidation())) : null;
             if (!ciqRows.isEmpty() && hasVariablePattern(resolved)) {
-                // Per-row expansion — write metadata once before the expanded block
-                if (desc     != null) sb.append("## cmd-desc: ").append(desc).append("\n");
-                if (validate != null) sb.append("## cmd-validate: ").append(validate).append("\n");
+                // Per-row expansion — each expanded line shares the same desc/validation
                 for (Map<String, String> row : ciqRows) {
-                    sb.append(resolveRowVariables(resolved, row)).append("\n");
+                    String rowResolved = resolveRowVariables(resolved, row);
+                    sb.append(rowResolved).append("\n");
+                    metaLines.add(new MopSection.CommandLine(rowResolved, desc, validate));
                 }
             } else {
-                if (desc     != null) sb.append("## cmd-desc: ").append(desc).append("\n");
-                if (validate != null) sb.append("## cmd-validate: ").append(validate).append("\n");
                 sb.append(resolved).append("\n");
+                metaLines.add(new MopSection.CommandLine(resolved, desc, validate));
             }
         }
         sb.append("}\n");
+    }
+
+    /**
+     * Serialise per-block command metadata collected in {@link #sectionMetadata}
+     * to a sidecar JSON file alongside the MOP.  The approval summary reads this
+     * file to render per-command description and validation without reading them
+     * from the MOP payload.
+     *
+     * <p>The file is written as {@code <mopOutputPath>.meta.json}.
+     * If no block has any command metadata the file is not created.
+     */
+    private void writeSectionMetadata(String mopOutputPath) throws IOException {
+        boolean hasAny = false;
+        for (List<MopSection.CommandLine> lines : sectionMetadata.values()) {
+            for (MopSection.CommandLine cl : lines) {
+                if (cl.description != null || cl.validation != null) { hasAny = true; break; }
+            }
+            if (hasAny) break;
+        }
+        if (!hasAny) return;
+
+        Map<String, List<Map<String, String>>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, List<MopSection.CommandLine>> e : sectionMetadata.entrySet()) {
+            List<Map<String, String>> cmds = new ArrayList<>();
+            for (MopSection.CommandLine cl : e.getValue()) {
+                Map<String, String> m = new LinkedHashMap<>();
+                m.put("text", cl.text);
+                if (cl.description != null) m.put("description", cl.description);
+                if (cl.validation  != null) m.put("validation",  cl.validation);
+                cmds.add(m);
+            }
+            out.put(e.getKey(), cmds);
+        }
+        new ObjectMapper().writeValue(new File(mopOutputPath + ".meta.json"), out);
+        log.debug("Metadata sidecar written: {}", mopOutputPath + ".meta.json");
     }
 
     /**
@@ -1292,6 +1338,7 @@ public class MopGenerator {
         // Seed variable context with node identity
         variableContext.clear();
         ciqRows.clear();
+        sectionMetadata.clear();
         variableContext.put("NODE", nodeName);
         variableContext.put("NEID", neId);
 
@@ -1411,6 +1458,7 @@ public class MopGenerator {
         try (Writer w = new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8)) {
             w.write(sb.toString());
         }
+        writeSectionMetadata(outputPath);
         log.info("  MOP written: {}", outputPath);
     }
 
@@ -1535,6 +1583,7 @@ public class MopGenerator {
         // columns will be added below as each sheet is loaded.
         variableContext.clear();
         ciqRows.clear();
+        sectionMetadata.clear();
         variableContext.put("NODE", nodeName);
         variableContext.put("NEID", neId);
 
@@ -1640,6 +1689,7 @@ public class MopGenerator {
         try (Writer w = new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8)) {
             w.write(sb.toString());
         }
+        writeSectionMetadata(outputPath);
         log.info("  MOP written: {}", outputPath);
     }
 

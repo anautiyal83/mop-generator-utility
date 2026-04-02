@@ -23,6 +23,7 @@ public class HtmlGroupApprovalMopGenerator implements GroupApprovalMopGenerator 
     public void generate(String mopFilePath, GroupIndex groupIndex, String outputPath) throws IOException {
         String mopContent = new String(Files.readAllBytes(new java.io.File(mopFilePath).toPath()), StandardCharsets.UTF_8);
         List<MopSection> sections = GroupApprovalMopGenerator.parseMopFile(mopContent);
+        GroupApprovalMopGenerator.mergeMetadata(sections, GroupApprovalMopGenerator.loadMetadata(mopFilePath));
 
         String nodeType = groupIndex.getNodeType();
         String activity = groupIndex.getActivity();
@@ -203,6 +204,7 @@ public class HtmlGroupApprovalMopGenerator implements GroupApprovalMopGenerator 
             } else {
                 String mopContent = new String(Files.readAllBytes(new File(mopFilePath).toPath()), StandardCharsets.UTF_8);
                 List<MopSection> sections = GroupApprovalMopGenerator.parseMopFile(mopContent);
+                GroupApprovalMopGenerator.mergeMetadata(sections, GroupApprovalMopGenerator.loadMetadata(mopFilePath));
                 writeSections(html, sections, groupName);
             }
             html.append("</div>\n");
