@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TITLE}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #333; font-size: 14px; }
+
+    /* ── Page header ───────────────────────────────────────── */
+    .header { background: #1a3a5c; color: #fff; padding: 20px 30px; }
+    .header h1 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+    .header-meta { display: flex; gap: 30px; font-size: 13px; color: #b0c4d8; flex-wrap: wrap; }
+
+    /* ── Approval banner ───────────────────────────────────── */
+    .approval-banner {
+      margin: 20px 30px 0;
+      padding: 10px 18px;
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 13px;
+      color: #856404;
+    }
+
+    /* ── Node overview chips ───────────────────────────────── */
+    .node-overview {
+      margin: 16px 30px;
+      background: #e8f0fe;
+      border-left: 4px solid #1a3a5c;
+      padding: 10px 16px;
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+    }
+    .node-overview strong { color: #1a3a5c; }
+    .node-chip {
+      display: inline-block;
+      background: #1a3a5c;
+      color: #fff;
+      border-radius: 12px;
+      padding: 2px 11px;
+      margin: 3px 4px;
+      font-size: 0.88em;
+    }
+
+    /* ── Unit (node) collapsible block ─────────────────────── */
+    .unit-block {
+      margin: 0 30px 16px;
+      background: #fff;
+      border: 1px solid #c8d8f0;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+    .unit-block[open] { border-color: #1a3a5c; }
+    .unit-summary {
+      display: flex;
+      align-items: center;
+      gap: 0.8em;
+      padding: 12px 18px;
+      background: linear-gradient(90deg, #1a3a5c 0%, #2a5a8c 100%);
+      color: #fff;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    .unit-summary::-webkit-details-marker { display: none; }
+    .unit-summary::marker { display: none; }
+    .toggle-icon { font-size: 1.1em; transition: transform 0.2s; flex-shrink: 0; }
+    .unit-block[open] .toggle-icon { transform: rotate(90deg); }
+    .unit-label { font-weight: 600; font-size: 15px; flex: 1; }
+    .unit-badge {
+      background: rgba(255,255,255,0.22);
+      border-radius: 10px;
+      padding: 1px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .info-chip {
+      display: inline-block;
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 10px;
+      padding: 1px 9px;
+      font-size: 12px;
+      margin-left: 2px;
+    }
+    .chip-key   { opacity: 0.8; margin-right: 3px; }
+    .chip-value { font-weight: bold; }
+    .unit-content { padding: 0 18px 16px 18px; }
+
+    /* ── Phase headings ─────────────────────────────────────── */
+    .phase-heading {
+      color: #1a3a5c;
+      font-size: 14px;
+      font-weight: 700;
+      margin: 16px 0 8px 0;
+      border-bottom: 2px solid #1a3a5c;
+      padding-bottom: 4px;
+    }
+    .rollback-heading {
+      color: #c0392b;
+      font-size: 14px;
+      font-weight: 700;
+      margin: 20px 0 8px 0;
+      border-bottom: 2px solid #c0392b;
+      padding-bottom: 4px;
+    }
+    .rollback-divider { border: none; border-top: 3px dashed #c0392b; margin: 24px 0 12px 0; }
+
+    /* ── MOP section blocks ─────────────────────────────────── */
+    .mop-section        { border-left: 4px solid #2a5a8c; padding: 6px 0 6px 14px; margin: 10px 0; }
+    .mop-section.rb     { border-left-color: #c0392b; }
+    .section-heading    { color: #2a5a8c; margin: 0 0 4px 0; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+    .section-heading.rb { color: #c0392b; }
+    .section-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #1a3a5c; color: #fff; border-radius: 50%;
+      width: 1.7em; height: 1.7em; font-size: 11px; flex-shrink: 0;
+    }
+    .section-num.rb  { background: #c0392b; }
+    .section-meta    { font-size: 12px; color: #666; margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .section-desc    { font-size: 12px; color: #444; font-style: italic; margin: 2px 0 5px 0; }
+
+    /* ── Badges ─────────────────────────────────────────────── */
+    .badge          { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+    .badge-cli      { background: #d1ecf1; color: #0c5460; }
+    .badge-create   { background: #d4edda; color: #155724; }
+    .badge-delete   { background: #f8d7da; color: #721c24; }
+    .badge-modify   { background: #fff3cd; color: #856404; }
+    .badge-rollback { background: #f8d7da; color: #721c24; }
+
+    /* ── Command blocks ─────────────────────────────────────── */
+    pre.cmd-block {
+      background: #1e1e1e; color: #d4d4d4;
+      padding: 10px 14px; border-radius: 4px;
+      overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 5px 0 0 0;
+    }
+    .cmd-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 5px 0 0 0; }
+    .cmd-table thead tr { background: #1a3a5c; color: #fff; }
+    .cmd-table th { padding: 6px 10px; text-align: left; font-weight: 600; white-space: nowrap; }
+    .cmd-table td { padding: 5px 10px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+    .cmd-table tbody tr:nth-child(even) { background: #f8f9fa; }
+    .cmd-table tbody tr:hover           { background: #e8f0fe; }
+    .cmd-table code {
+      background: #1e1e1e; color: #d4d4d4;
+      padding: 1px 5px; border-radius: 3px; font-size: 12px;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .cmd-num { color: #888; text-align: center; width: 2em; }
+    .cmd-comment td   { color: #888; font-style: italic; }
+    .cmd-comment code { background: #2d2d2d; color: #888; }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    footer { margin: 30px; font-size: 12px; color: #999; border-top: 1px solid #dde; padding-top: 12px; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>MOP Approval Summary</h1>
+    <div class="header-meta">
+      <span><b>Node Type:</b> {{nodeType}}</span>
+      <span><b>Activity:</b> {{activity}}</span>
+      <span><b>CR Group:</b> {{crGroup}}</span>
+      <span><b>Generated:</b> {{generated}}</span>
+    </div>
+  </div>
+
+  <!-- APPROVAL BANNER -->
+  <div class="approval-banner">
+    &#9888; APPROVAL COPY &mdash; For review and sign-off only. Do <strong>NOT</strong> use for direct execution.
+  </div>
+
+  <!-- NODE OVERVIEW -->
+  <div class="node-overview">
+    <strong>Nodes covered by this MOP:</strong>&nbsp;
+	{{#nodeChips}}
+    	<span class="node-chip">{{nodeInfo.node}}</span>
+	{{/nodeChips}}
+  </div>
+
+  <!-- NODE SECTIONS -->
+{{#nodes}}
+  <details class="unit-block" open id="unit-{{NODE_ID}}">
+    <summary class="unit-summary">
+      <span class="toggle-icon">&#9654;</span>
+      <span class="unit-label">{{nodeInfo.node}}</span>
+      <span class="unit-badge">NEID: {{nodeInfo.niamID}}</span>
+		{{#nodeExtraInfo}}
+	      <span class="info-chip">
+	        <span class="chip-key">{{extraInfo.key}}:</span>
+	        <span class="chip-value">{{extraInfo.value}}</span>
+	      </span>
+		{{/nodeExtraInfo}}
+    </summary>
+    <div class="unit-content">
+
+	{{#if_hasActivitySections}}
+      <h3 class="phase-heading">&#9654; Activity</h3>
+	{{/if_hasActivitySections}}
+	{{#activitySections}}
+      <section class="mop-section" id="s-{{NODE_ID}}-fw{{section.number}}">
+        <h4 class="section-heading">
+          <span class="section-num">{{section.number}}</span>
+          {{section.name}}
+        </h4>
+        <div class="section-meta">
+		 {{#if_sectionTargetNode}}
+          <span>Target: <strong>{{section.targetNode}}</strong></span>
+		 {{/if_sectionTargetNode}}
+		 {{#if_sectionMethod}}
+          <span><span class="badge badge-cli">{{section.method}}</span></span>
+		 {{/if_sectionMethod}}
+		 {{#if_sectionTypeLabel}}
+          <span><span class="badge {{section.typeBadgeClass}}">{{section.typeLabel}}</span></span>
+		 {{/if_sectionTypeLabel}}
+        </div>
+		{{#if_sectionDescription}}
+        <p class="section-desc">{{section.description}}</p>
+		{{/if_sectionDescription}}
+		{{#commandsTable}}
+        <table class="cmd-table">
+          <thead><tr><th>#</th><th>Command</th><th>Description</th><th>Validation</th></tr></thead>
+          <tbody>
+		 	{{#commandRow}}
+            <tr class="{{cmd.commentClass}}">
+              <td class="cmd-num">{{cmd.number}}</td>
+              <td><code>{{cmd.text}}</code></td>
+              <td>{{cmd.description}}</td>
+              <td>{{cmd.validation}}</td>
+            </tr>
+			{{/commandRow}}
+          </tbody>
+        </table>
+		{{/commandsTable}}
+		{{#commandsBlock}}
+        <pre class="cmd-block">{{#commandLine}}{{cmd.text}}{{/commandLine}}</pre>
+		{{/commandsBlock}}
+      </section>
+	 {{/activitySections}}
+
+	{{#if_hasRollbackSections}}
+      <hr class="rollback-divider">
+      <h3 class="rollback-heading">&#9100; Rollback</h3>
+	{{/if_hasRollbackSections}}
+	{{#rollbackSections}}
+      <section class="mop-section rb" id="s-{{NODE_ID}}-rb{{section.number}}">
+        <h4 class="section-heading rb">
+          <span class="section-num rb">{{section.number}}</span>{{section.name}}
+        </h4>
+        <div class="section-meta">
+		{{#if_sectionTargetNode}}
+          <span>Target: <strong>{{section.targetNode}}</strong></span>
+		{{/if_sectionTargetNode}}
+		{{#if_sectionMethod}}
+          <span><span class="badge badge-cli">{{section.method}}</span></span>
+		{{/if_sectionMethod}}
+		{{#if_sectionTypeLabel}}
+          <span><span class="badge {{section.typeBadgeClass}}">{{section.typeLabel}}</span></span>
+		{{/if_sectionTypeLabel}}
+        </div>
+		{{#if_sectionDescription}}
+        <p class="section-desc">{{section.description}}</p>
+		{{/if_sectionDescription}}
+		{{#commandsTable}}
+        <table class="cmd-table">
+          <thead><tr><th>#</th><th>Command</th><th>Description</th><th>Validation</th></tr></thead>
+          <tbody>
+			{{#commandRow}}
+            <tr class="{{cmd.commentClass}}">
+              <td class="cmd-num">{{cmd.number}}</td>
+              <td><code>{{cmd.text}}</code></td>
+              <td>{{cmd.description}}</td>
+              <td>{{cmd.validation}}</td>
+            </tr>
+			{{/commandRow}}
+          </tbody>
+        </table>
+		{{/commandsTable}}
+		{{#commandsBlock}}
+        <pre class="cmd-block">{{#commandLine}}{{cmd.text}}{{/commandLine}}</pre>
+		{{/commandsBlock}}
+      </section>
+	{{/rollbackSections}}
+    </div>
+  </details>
+{{/nodes}}
+
+  <!-- FOOTER -->
+  <footer>
+    Generated by MOP Generator Utility &nbsp;|&nbsp; {{generated}} &nbsp;|&nbsp;
+    APPROVAL COPY &mdash; Not for direct execution
+  </footer>
+
+</body>
+</html>

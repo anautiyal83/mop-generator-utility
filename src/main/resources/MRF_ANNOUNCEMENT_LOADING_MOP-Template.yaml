@@ -23,10 +23,6 @@
 constants:
   #ANN_DIR:  "/var/opt/swms/clips/persistent/provisioned/audioclips/${CIRCLE}/PREPAID"
  
-# MOP generation mode (per GROUP within a CRGROUP):
-#   GROUP — one shared MOP per GROUP: <base>_<group>_MOP.<ext>
-#   NODE  — one MOP per node:         <base>_<node>_MOP.<ext>
-mopGenerationMode: NODE
 
 # Approval document format:
 #   TEXT    — no separate approval doc; the MOP file itself is used for approval
@@ -68,7 +64,7 @@ backup:
     commands:
      - cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
        description: "Display Files and folders in the announcement directory"
-       validation: "Validate that files and folders exists in the announcement directory "
+       validation: "Validate that files and folders exists in the announcement directory"
      - cmd: "mkdir -p /tmp/${VERSION}/"
        description: "Creates temp directory with the MRF version"
        validation: "Validate that a mkdir command is executed successfully, with no errors"

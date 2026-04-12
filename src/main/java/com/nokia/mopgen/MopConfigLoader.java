@@ -22,14 +22,14 @@ import java.util.Map;
  * be repeated.
  *
  * <pre>
- * # SBC_FIXED_LINE_CONFIGURATION_MOP-Template.yaml
+ * # MRF_ANNOUNCEMENT_LOADING_MOP-Template.yaml
  * includes:
- *   - "SBC_common_blocks.yaml"   # defines preNodeHealthCheck, rollback, etc.
+ *   - "MRF_common_blocks.yaml"   # defines preNodeHealthCheck, rollback, etc.
  *
- * defaultNamespace: "http://nokia.com/yang/isbc-sig"
- * backup:
- *   name: "BACKUP"
- *   commands: ["backup create FIXED_LINE"]
+ * activity:
+ *   execution:
+ *     - name: "LOAD_ANNOUNCEMENT_FILES"
+ *       ...
  * </pre>
  *
  * Included files may themselves include further files (recursive).
@@ -108,26 +108,10 @@ public class MopConfigLoader {
         MopConfig cfg = new MopConfig();
         if (raw == null) return cfg;
 
-        if (raw.containsKey("mopGenerationMode"))
-            cfg.setMopGenerationMode((String) raw.get("mopGenerationMode"));
         if (raw.containsKey("mopApprovalFormatType"))
             cfg.setMopApprovalFormatType((String) raw.get("mopApprovalFormatType"));
-        if (raw.containsKey("mopSummaryGenerationMode"))
-            cfg.setMopSummaryGenerationMode((String) raw.get("mopSummaryGenerationMode"));
-        if (raw.containsKey("xmlBuilder"))
-            cfg.setXmlBuilderName((String) raw.get("xmlBuilder"));
-        if (raw.containsKey("configAttributes"))
-            cfg.setConfigAttributes(toStringMap((Map<String, Object>) raw.get("configAttributes")));
-        if (raw.containsKey("defaultNamespace"))
-            cfg.setDefaultNamespace((String) raw.get("defaultNamespace"));
-        if (raw.containsKey("netconfNamespace"))
-            cfg.setNetconfNamespace((String) raw.get("netconfNamespace"));
-        if (raw.containsKey("storagePath"))
-            cfg.setStoragePath((String) raw.get("storagePath"));
-        if (raw.containsKey("commands"))
-            cfg.setCommands(parseCommandConfig((Map<String, Object>) raw.get("commands")));
-        if (raw.containsKey("tables"))
-            cfg.setTables(parseTableConfigs((Map<String, Object>) raw.get("tables")));
+        if (raw.containsKey("jsonMapping"))
+            cfg.setJsonMapping(toStringMap((Map<String, Object>) raw.get("jsonMapping")));
         if (raw.containsKey("preNodeHealthCheck"))
             cfg.setPreNodeHealthCheck(parseActivityList(raw.get("preNodeHealthCheck")));
         if (raw.containsKey("backup"))
@@ -143,70 +127,6 @@ public class MopConfigLoader {
             cfg.setConstants(toStringMap((Map<String, Object>) raw.get("constants")));
 
         return cfg;
-    }
-
-    @SuppressWarnings("unchecked")
-    private CommandConfig parseCommandConfig(Map<String, Object> raw) {
-        CommandConfig cc = new CommandConfig();
-        if (raw == null) return cc;
-        if (raw.containsKey("stageFile"))   cc.setStageFile((String) raw.get("stageFile"));
-        if (raw.containsKey("heredocEnd"))  cc.setHeredocEnd((String) raw.get("heredocEnd"));
-        if (raw.containsKey("applyConfig")) cc.setApplyConfig((String) raw.get("applyConfig"));
-        return cc;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, TableConfig> parseTableConfigs(Map<String, Object> raw) {
-        Map<String, TableConfig> result = new LinkedHashMap<>();
-        if (raw == null) return result;
-        for (Map.Entry<String, Object> entry : raw.entrySet()) {
-            result.put(entry.getKey(),
-                    parseTableConfig((Map<String, Object>) entry.getValue()));
-        }
-        return result;
-    }
-
-    @SuppressWarnings("unchecked")
-    private TableConfig parseTableConfig(Map<String, Object> raw) {
-        TableConfig tc = new TableConfig();
-        if (raw == null) return tc;
-        if (raw.containsKey("namespace"))      tc.setNamespace((String) raw.get("namespace"));
-        if (raw.containsKey("xmlElement"))     tc.setXmlElement((String) raw.get("xmlElement"));
-        if (raw.containsKey("recordElement"))  tc.setRecordElement((String) raw.get("recordElement"));
-        if (raw.containsKey("columnMappings"))
-            tc.setColumnMappings((Map<String, String>) raw.get("columnMappings"));
-        if (raw.containsKey("configAttributes"))
-            tc.setConfigAttributes(toStringMap((Map<String, Object>) raw.get("configAttributes")));
-        if (raw.containsKey("xmlTemplates"))
-            tc.setXmlTemplates(parseTableXmlTemplates(
-                    (Map<String, Object>) raw.get("xmlTemplates")));
-        return tc;
-    }
-
-    @SuppressWarnings("unchecked")
-    private TableXmlTemplates parseTableXmlTemplates(Map<String, Object> raw) {
-        TableXmlTemplates t = new TableXmlTemplates();
-        if (raw == null) return t;
-        if (raw.containsKey("create"))
-            t.setCreate(parseActionTemplate((Map<String, Object>) raw.get("create")));
-        if (raw.containsKey("delete"))
-            t.setDelete(parseActionTemplate((Map<String, Object>) raw.get("delete")));
-        if (raw.containsKey("modify"))
-            t.setModify(parseActionTemplate((Map<String, Object>) raw.get("modify")));
-        if (raw.containsKey("rollback"))
-            t.setRollback(parseActionTemplate((Map<String, Object>) raw.get("rollback")));
-        return t;
-    }
-
-    @SuppressWarnings("unchecked")
-    private ActionTemplate parseActionTemplate(Map<String, Object> raw) {
-        ActionTemplate t = new ActionTemplate();
-        if (raw == null) return t;
-        if (raw.containsKey("envelope"))   t.setEnvelope((String) raw.get("envelope"));
-        if (raw.containsKey("record"))     t.setRecord((String) raw.get("record"));
-        if (raw.containsKey("subRecords"))
-            t.setSubRecords((Map<String, String>) raw.get("subRecords"));
-        return t;
     }
 
     /**
@@ -240,7 +160,8 @@ public class MopConfigLoader {
 
     /**
      * Parse a YAML commands list where each item is either a plain {@code String}
-     * or a conditional map with {@code if}/{@code then}/{@code else} keys.
+     * or a conditional map with {@code if}/{@code then}/{@code else} keys,
+     * or a rich map with {@code cmd}/{@code description}/{@code validation} keys.
      */
     @SuppressWarnings("unchecked")
     private List<CommandEntry> parseCommandEntries(Object raw) {
@@ -282,12 +203,6 @@ public class MopConfigLoader {
             }
             ac.setPrecheck(list);
         }
-        if (raw.containsKey("configuration")) {
-            ac.setConfiguration((List<String>) raw.get("configuration"));
-        }
-        if (raw.containsKey("configurationTargetNode")) {
-            ac.setConfigurationTargetNode((String) raw.get("configurationTargetNode"));
-        }
         if (raw.containsKey("execution")) {
             List<ActivityConfig> list = new ArrayList<>();
             for (Map<String, Object> item : (List<Map<String, Object>>) raw.get("execution")) {
@@ -302,42 +217,7 @@ public class MopConfigLoader {
             }
             ac.setPostcheck(list);
         }
-        if (raw.containsKey("tablePrecheck")) {
-            ac.setTablePrecheck(parseTablePrecheckConfig(
-                    (Map<String, Object>) raw.get("tablePrecheck")));
-        }
-        if (raw.containsKey("tablePostcheck")) {
-            ac.setTablePostcheck(parseTablePostcheckConfig(
-                    (Map<String, Object>) raw.get("tablePostcheck")));
-        }
         return ac;
-    }
-
-    @SuppressWarnings("unchecked")
-    private TablePrecheckConfig parseTablePrecheckConfig(Map<String, Object> raw) {
-        TablePrecheckConfig tpc = new TablePrecheckConfig();
-        if (raw == null) return tpc;
-        if (raw.containsKey("enabled"))            tpc.setEnabled((Boolean) raw.get("enabled"));
-        if (raw.containsKey("targetNode"))         tpc.setTargetNode((String) raw.get("targetNode"));
-        if (raw.containsKey("downloadCommand"))    tpc.setDownloadCommand((String) raw.get("downloadCommand"));
-        if (raw.containsKey("createCheckCommand")) tpc.setCreateCheckCommand((String) raw.get("createCheckCommand"));
-        if (raw.containsKey("existsCheckCommand")) tpc.setExistsCheckCommand((String) raw.get("existsCheckCommand"));
-        return tpc;
-    }
-
-    @SuppressWarnings("unchecked")
-    private TablePostcheckConfig parseTablePostcheckConfig(Map<String, Object> raw) {
-        TablePostcheckConfig tpc = new TablePostcheckConfig();
-        if (raw == null) return tpc;
-        if (raw.containsKey("enabled"))              tpc.setEnabled((Boolean) raw.get("enabled"));
-        if (raw.containsKey("targetNode"))           tpc.setTargetNode((String) raw.get("targetNode"));
-        if (raw.containsKey("downloadCommand"))      tpc.setDownloadCommand((String) raw.get("downloadCommand"));
-        if (raw.containsKey("createCheckCommand"))   tpc.setCreateCheckCommand((String) raw.get("createCheckCommand"));
-        if (raw.containsKey("deleteCheckCommand"))   tpc.setDeleteCheckCommand((String) raw.get("deleteCheckCommand"));
-        if (raw.containsKey("modFieldCheckCommand")) tpc.setModFieldCheckCommand((String) raw.get("modFieldCheckCommand"));
-        if (raw.containsKey("subAddCheckCommand"))   tpc.setSubAddCheckCommand((String) raw.get("subAddCheckCommand"));
-        if (raw.containsKey("subDelCheckCommand"))   tpc.setSubDelCheckCommand((String) raw.get("subDelCheckCommand"));
-        return tpc;
     }
 
     @SuppressWarnings("unchecked")
@@ -350,12 +230,6 @@ public class MopConfigLoader {
                 list.add(parseActivityConfig(item));
             }
             rc.setPrecheck(list);
-        }
-        if (raw.containsKey("configuration")) {
-            rc.setConfiguration((List<String>) raw.get("configuration"));
-        }
-        if (raw.containsKey("configurationTargetNode")) {
-            rc.setConfigurationTargetNode((String) raw.get("configurationTargetNode"));
         }
         if (raw.containsKey("execution")) {
             List<ActivityConfig> list = new ArrayList<>();
@@ -370,14 +244,6 @@ public class MopConfigLoader {
                 list.add(parseActivityConfig(item));
             }
             rc.setPostcheck(list);
-        }
-        if (raw.containsKey("tablePrecheck")) {
-            rc.setTablePrecheck(parseTablePrecheckConfig(
-                    (Map<String, Object>) raw.get("tablePrecheck")));
-        }
-        if (raw.containsKey("tablePostcheck")) {
-            rc.setTablePostcheck(parseTablePostcheckConfig(
-                    (Map<String, Object>) raw.get("tablePostcheck")));
         }
         return rc;
     }
