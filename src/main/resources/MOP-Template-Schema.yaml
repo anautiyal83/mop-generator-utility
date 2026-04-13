@@ -1,0 +1,740 @@
+# ============================================================================
+# MOP Template Schema — Reference for {NODE_TYPE}_{ACTIVITY}_MOP-Template.yaml
+# ============================================================================
+#
+# A MOP-Template file is the SINGLE source of truth for both:
+#   1. MOP Summary (approval document) generation — mop-generator-utility
+#   2. MOP Execution                              — network-command-executor-utility
+#
+# File naming convention: {NODE_TYPE}_{ACTIVITY}_MOP-Template.yaml
+# ============================================================================
+
+
+# ============================================================================
+# TOP-LEVEL FIELDS
+# ============================================================================
+nodeType:  <NODE_TYPE>          # e.g. MRF, SBC
+activity:  <ACTIVITY_NAME>      # e.g. ANNOUNCEMENT_LOADING
+
+# Approval-summary document format:
+#   HTML   — generates an HTML approval document (default)
+#   MSWORD — generates a .docx MS Word document
+mopApprovalFormatType: HTML
+
+# Optional: path to an external HTML summary template.
+# summaryTemplatePath: templates/mop-summary-template.html
+
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+constants:
+  <KEY>: "<value>"
+  # Referenced anywhere as ${KEY}.
+  # CIQ JSON variables override constants when names collide.
+
+
+# ============================================================================
+# SECTION STRUCTURE
+# ─────────────────────────────────────────────────────────────────────────────
+# Sections (executed in this order):
+#
+#   preNodeHealthCheck   — list of blocks
+#   backup               — list of blocks
+#   activity             — object with precheck / execution / postcheck
+#   postNodeHealthCheck  — list of blocks
+#   rollback             — object with precheck / execution / postcheck
+#
+# Hierarchy:  Section  →  Block  →  Step  →  Command
+#
+# Cross-phase linking: any block, step, or command may carry an  id:  field.
+# Any later element may reference that id in a  runIf:  expression.
+# Ids are resolved globally across all sections in declaration order.
+# ============================================================================
+
+
+# ============================================================================
+# BLOCK
+# ============================================================================
+#
+#   id          — (optional) identifier for cross-phase runIf references
+#   name        — shown in the approval summary and execution report
+#   description — human-readable purpose for summary section headers
+#   steps       — ordered list of Step objects
+#   runIf       — skip this block unless the condition is true
+
+
+# ============================================================================
+# STEP
+# ─────────────────────────────────────────────────────────────────────────────
+# Groups commands executed sequentially on ONE target machine.
+# ============================================================================
+#
+#   id                — (optional) identifier for cross-phase referencing
+#   target            — machine alias or ${VARIABLE}.
+#                       Resolved at execution time against a connection profile.
+#                       Conventions: LOCAL | REPO_SERVER | MRF_NODE | ${NEID}
+#   description       — label shown in the approval summary for this step group
+#   commands          — ordered list of Command Entries
+#   runIf             — skip this step unless the condition is true
+#   continueOnFailure — step-level default: true = continue to next command when
+#                       any command in this step fails (default: false).
+#                       Override for a specific command using  onFailure:  on that command.
+#
+# Note: there is no  method  at the step level — method is declared per command,
+# allowing CLI and REST commands to be mixed within the same step.
+
+
+# ============================================================================
+# COMMAND ENTRY — three forms
+# ============================================================================
+
+# ── Form 1: Plain string ──────────────────────────────────────────────────
+# Shorthand for a CLI command with no metadata or validation.
+#
+# commands:
+#   - "service swms status"
+#   - "ls -lrth ${MRF_DESTINATION_PATH}"
+
+
+# ── Form 2a: Rich CLI command ─────────────────────────────────────────────
+#
+# commands:
+#   - id: <unique_identifier>
+#     method: CLI                       # SSH shell execution (default)
+#     cmd: "<shell command>"
+#     description: "<what it does>"
+#     runIf:  "<condition expression>"
+#     onFailure: <escalation>           # see onFailure reference below
+#     failureCode: "<code>"             # optional — emitted to external systems on
+#                                       # validation failure (not shown in report)
+#     saveOutputAs: "<name>"            # optional — save stdout to a named capture
+#                                       # for later comparison (see OUTPUT CAPTURE)
+#     validation:
+#       enabled: true | false
+#       type: contains | not_contains | regex | exit_code | compare_output | info_only
+#       expression: "<string | regex | exit code>"
+#       negate: false
+#       criteria: "<human-readable description of the check>"
+#       successMessage: "<logged on pass>"
+#       failureMessage: "<logged on fail>"
+
+
+# ── Form 2b: REST command ─────────────────────────────────────────────────
+# Used for HTTP / REST API calls — no  cmd  field; uses  request:  instead.
+#
+# commands:
+#   - id: <unique_identifier>
+#     method: REST
+#     description: "<what this API call does>"
+#     request:
+#       method: GET | POST | PUT | DELETE | PATCH
+#       url: "<endpoint URL — ${VAR} substitution supported>"
+#       headers:                        # optional HTTP headers map
+#         <Header-Name>: "<value>"
+#       queryParams:                    # optional query string parameters
+#         <param>: "<value>"
+#       contentType: "application/json" # shorthand for Content-Type header
+#       body: |                         # optional inline request body
+#         { "key": "${VALUE}" }
+#       bodyFile: "<path>"              # alternative: load body from a file
+#       auth:                           # authentication block (optional)
+#         type: bearer | basic | apikey
+#         # bearer
+#         token: "${GIT_TOKEN}"
+#         # basic
+#         username: "${API_USER}"
+#         password: "${API_PASSWORD}"
+#         # apikey
+#         header: "X-API-Key"
+#         value:  "${API_KEY}"
+#       saveResponseTo:    "<file path>" # save response body to a file
+#       saveHeadersTo:     "<file path>" # save response headers to a file
+#       timeout:           30            # request timeout in seconds (default 30)
+#       followRedirects:   true          # follow HTTP 3xx redirects (default true)
+#       ignoreSslErrors:   false         # skip SSL cert validation (default false)
+#     runIf:  "<condition expression>"
+#     onFailure: <escalation>
+#     failureCode: "<code>"             # optional — emitted to external systems on
+#                                       # validation failure (not shown in report)
+#     saveOutputAs: "<name>"            # optional — save response body to a named
+#                                       # capture for later comparison
+#     validation:
+#       enabled: true
+#       type: http_status | http_status_range | json_path | xml_xpath |
+#             contains   | not_contains      | regex     | compare_output | info_only
+#       expression: "<see Validation Types below>"
+#       negate: false
+#       criteria: "<human-readable description>"
+#       successMessage: "<logged on pass>"
+#       failureMessage: "<logged on fail>"
+
+
+# ── Form 3: Conditional (if / then / else) ────────────────────────────────
+# Condition evaluated at execution time.  Branches are lists of Command Entries
+# (any mix of Form 1, 2a, 2b, or nested Form 3).
+#
+# commands:
+#   - if:   "${VERSION} == 13.X.X.X"
+#     then:
+#       - method: CLI
+#         cmd: "cp -r /tmp/${INPUT_FILE | stripExt}/* ${MRF_DESTINATION_PATH}"
+#         description: "Copy individual files for v13"
+#         onFailure: abort_section
+#         validation:
+#           enabled: true
+#           type: exit_code
+#           expression: "0"
+#           successMessage: "Files copied"
+#           failureMessage: "Copy failed"
+#     else:
+#       - method: CLI
+#         cmd: "tar -xf /tmp/${INPUT_FILE} -C ${MRF_DESTINATION_PATH}"
+#         description: "Untar for all other versions"
+#         onFailure: abort_section
+#         validation:
+#           enabled: true
+#           type: exit_code
+#           expression: "0"
+#           successMessage: "Archive extracted"
+#           failureMessage: "Extraction failed"
+
+
+# ============================================================================
+# VALIDATION TYPES — full reference
+# ─────────────────────────────────────────────────────────────────────────────
+# Applicable to CLI commands (method: CLI):
+#
+#   contains       expression: "<string>"
+#                  Pass when stdout/stderr contains the string.
+#
+#   not_contains   expression: "<string>"
+#                  Pass when stdout/stderr does NOT contain the string.
+#
+#   regex          expression: "<Java regex>"
+#                  Pass when stdout/stderr matches the regex.
+#
+#   exit_code      expression: "<integer>"
+#                  Pass when the command exit code equals the value (e.g. "0").
+#
+#   info_only      No pass/fail evaluation; result is logged and displayed.
+#
+#   compare_output expression: "<saved_name>"
+#                  comparator: equals | not_equals | contains | not_contains | regex
+#                              (default: equals)
+#                  Pass when stdout matches the previously captured output named
+#                  <saved_name>  (see OUTPUT CAPTURE section).
+#                  E.g. compare directory listing in postcheck against precheck snapshot.
+#
+# Applicable to REST commands (method: REST):
+#
+#   http_status    expression: "<code>"        e.g. "200"
+#                  Pass when HTTP response status equals the code.
+#
+#   http_status_range  expression: "<low>-<high>"  e.g. "200-299"
+#                  Pass when HTTP response status is within the inclusive range.
+#
+#   json_path      expression: "<JsonPath> == <expected value>"
+#                  e.g. "$.status == Running"   or   "$.items.length() > 0"
+#                  Evaluates the JsonPath against the response body and
+#                  compares the result to the expected value.
+#                  Supported operators: == != > >= < <=
+#
+#   xml_xpath      expression: "<XPath> == <expected value>"
+#                  e.g. "//status/text() == Running"
+#                  Evaluates the XPath against the XML response body.
+#                  Same operators as json_path.
+#
+#   contains       expression: "<string>"
+#                  Pass when the response body contains the string.
+#                  (same semantic as CLI contains, applied to response body)
+#
+#   not_contains   expression: "<string>"
+#                  Pass when the response body does NOT contain the string.
+#
+#   regex          expression: "<Java regex>"
+#                  Pass when the response body matches the regex.
+#
+#   info_only      No pass/fail evaluation; response is logged only.
+#
+#   compare_output expression: "<saved_name>"
+#                  comparator: equals | not_equals | contains | not_contains | regex
+#                              (default: equals)
+#                  Same semantics as CLI compare_output, applied to response body.
+#
+# Common fields (all types):
+#
+#   negate: true   Invert the match result.
+#                  E.g.  type: contains, negate: true  means "must NOT contain".
+#   criteria       Human-readable description shown in the approval summary.
+#   successMessage Logged when validation passes.
+#   failureMessage Logged when validation fails.
+# ============================================================================
+
+
+# ============================================================================
+# CROSS-PHASE LINKING — runIf
+# ─────────────────────────────────────────────────────────────────────────────
+# Condition expression syntax:
+#
+#   Single outcome:
+#     "<id>.<state>"
+#
+#   Compound (AND / OR, left-to-right; parentheses for explicit grouping):
+#     "<id1>.<state> AND <id2>.<state>"
+#     "<id1>.<state> OR  <id2>.<state>"
+#     "(<id1>.<state> OR <id2>.<state>) AND <id3>.<state>"
+#
+# Outcome states:
+#
+#   passed       — command ran AND validation passed (or disabled / info_only)
+#   failed       — command ran AND validation failed
+#   skipped      — command was not executed due to a runIf condition
+#   executed     — command ran regardless of validation result
+#   not_executed — command was skipped or its parent block/step was never reached
+#
+# id scope:
+#   id on a BLOCK   → state = passed if all steps passed; failed otherwise
+#   id on a STEP    → state = passed if all commands passed; failed otherwise
+#   id on a COMMAND → state reflects that specific command's validation outcome
+#
+# Common patterns:
+#
+#   # Use REST API if git is absent (populated by a probing CLI command)
+#   runIf:  "git_available.failed"
+#
+#   # Skip SCP if file was already detected on the node
+#   runIf:  "precheck_file_exists.failed"
+#
+#   # Either download path may have succeeded
+#   runIf:  "git_clone_cmd.passed OR git_api_download.passed"
+#
+#   # Both backup and its confirmation must have succeeded before restoring
+#   runIf:  "backup_copy_cmd.passed AND rollback_backup_check.passed"
+#
+#   # Guard an entire execution block on a disk space check
+#   runIf:  "precheck_disk_space.passed"
+# ============================================================================
+
+
+# ============================================================================
+# OUTPUT CAPTURE — saveOutputAs / compare_output
+# ─────────────────────────────────────────────────────────────────────────────
+# Any CLI or REST command may declare:
+#   saveOutputAs: "<name>"
+#
+# This saves the command's stdout (CLI) or response body (REST) to an
+# in-memory named capture, scoped to the current MOP execution.
+# The capture is available to any later command in any section.
+#
+# To compare against a capture, use  type: compare_output  in validation:
+#   validation:
+#     enabled: true
+#     type: compare_output
+#     expression: "<saved_name>"       # name declared in saveOutputAs
+#     comparator: equals               # equals | not_equals | contains |
+#                                      # not_contains | regex  (default: equals)
+#     criteria: "<human-readable description>"
+#     successMessage: "<logged on pass>"
+#     failureMessage: "<logged on fail>"
+#
+# Typical pattern — snapshot before / verify after:
+#
+#   # precheck: capture directory listing
+#   - id: pre_listing_cmd
+#     method: CLI
+#     cmd: "ls -ltrh <path>"
+#     saveOutputAs: "pre_dir_listing"
+#     validation:
+#       enabled: true
+#       type: info_only
+#
+#   # postcheck: compare current listing against precheck snapshot
+#   - method: CLI
+#     cmd: "ls -ltrh <path>"
+#     validation:
+#       enabled: true
+#       type: compare_output
+#       expression: "pre_dir_listing"
+#       comparator: not_equals
+#       criteria: "Directory contents must have changed after loading"
+#       successMessage: "Directory contents changed as expected"
+#       failureMessage: "Directory contents unchanged — files may not have loaded"
+# ============================================================================
+
+
+# ============================================================================
+# onFailure — escalation when a command's validation fails
+# ─────────────────────────────────────────────────────────────────────────────
+#   continue       — log failure and continue to next command
+#   skip_step      — stop remaining commands in this step; move to next step
+#   skip_block     — stop remaining steps in this block; move to next block
+#   abort_section  — halt current section (precheck/execution/…); next section runs
+#   abort_mop      — halt the entire MOP; no further sections execute
+#
+# Default (when omitted):
+#   skip_block  — unless the parent step has  continueOnFailure: true,
+#                 in which case the effective default is  continue
+# ============================================================================
+
+
+# ============================================================================
+# failureCode — external system integration
+# ─────────────────────────────────────────────────────────────────────────────
+# An optional string declared on any command.
+# When the command's validation fails, the executor emits this code to
+# configured external systems (e.g. alerting, ticketing, monitoring).
+# It is NOT displayed in the execution report — only failureMessage appears there.
+#
+# Examples:
+#   failureCode: "DISK_FULL"
+#   failureCode: "SCP_TRANSFER_ERROR"
+#   failureCode: "SWMS_SERVICE_DOWN"
+#   failureCode: "PRIVILEGE_ESCALATION_FAILED"
+#
+# The set of codes and the external system targets are configured in the
+# network-command-executor-utility's runtime configuration, not in this file.
+# ============================================================================
+
+
+# ============================================================================
+# STRING FUNCTIONS — ${VARIABLE | function}
+# ============================================================================
+#   stripExt   file.tar → file       (remove file extension)
+#   lower                            lower-case the value
+#   upper                            upper-case the value
+#   trim                             strip leading/trailing whitespace
+
+
+# ============================================================================
+# FULL SKELETON — one of each construct
+# ============================================================================
+
+nodeType:  <NODE_TYPE>
+activity:  <ACTIVITY>
+mopApprovalFormatType: HTML
+
+constants:
+  <KEY>: "<value>"
+
+preNodeHealthCheck:
+  - name: PRE_NODE_HEALTH_CHECK
+    description: "<block purpose>"
+    steps:
+
+      # Probe step: determine which path to take
+      - target: LOCAL
+        description: "Check environment capabilities"
+        commands:
+          - id: tool_available
+            method: CLI
+            cmd: "which <tool>"
+            description: "Check if <tool> is installed"
+            onFailure: continue
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              successMessage: "<tool> found — CLI path will run"
+              failureMessage: "<tool> absent — REST path will run"
+
+      # CLI path (only if tool is available)
+      - id: cli_download_step
+        target: LOCAL
+        description: "Download via CLI"
+        runIf: "tool_available.passed"
+        commands:
+          - id: cli_download_cmd
+            method: CLI
+            cmd: "<cli command>"
+            description: "<what it does>"
+            onFailure: abort_section
+            validation:
+              enabled: true
+              type: contains
+              expression: "<expected output>"
+              criteria: "<check description>"
+              successMessage: "<pass>"
+              failureMessage: "<fail>"
+
+      # REST path 
+      - id: rest_download_step
+        target: LOCAL
+        description: "Download via REST API"
+        runIf: "tool_available.failed"
+        commands:
+          - id: rest_download_cmd
+            method: REST
+            description: "Download resource via API"
+            request:
+              method: GET
+              url: "https://api.example.com/resource/${VERSION}"
+              headers:
+                Accept: "application/octet-stream"
+              auth:
+                type: bearer
+                token: "${API_TOKEN}"
+              saveResponseTo: "${LOCAL_WORK_DIR}/resource.zip"
+              timeout: 60
+              followRedirects: true
+            onFailure: abort_section
+            validation:
+              enabled: true
+              type: http_status
+              expression: "200"
+              criteria: "API must return HTTP 200"
+              successMessage: "Resource downloaded via REST API"
+              failureMessage: "REST API download failed"
+
+          # Mix CLI in the same step after REST
+          - method: CLI
+            cmd: "unzip ${LOCAL_WORK_DIR}/resource.zip -d ${LOCAL_WORK_DIR}/unpacked"
+            description: "Extract the downloaded archive"
+            onFailure: abort_section
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              successMessage: "Archive extracted"
+              failureMessage: "Extraction failed"
+
+      # Downstream step — runs if either download path succeeded
+      - target: <TARGET>
+        description: "Continue with whichever download method succeeded"
+        runIf: "cli_download_cmd.passed OR rest_download_cmd.passed"
+        commands:
+          - id: node_health_cmd
+            method: CLI
+            cmd: "service <svc> status"
+            description: "Verify service is running"
+            onFailure: abort_mop
+            validation:
+              enabled: true
+              type: contains
+              expression: "active (running)"
+              criteria: "Service must be active before proceeding"
+              successMessage: "Service is running"
+              failureMessage: "Service is not running — MOP aborted"
+
+          - id: disk_check_cmd
+            method: CLI
+            cmd: "df -h <mount>"
+            description: "Verify sufficient disk space"
+            onFailure: skip_block
+            validation:
+              enabled: true
+              type: not_contains
+              expression: "100%"
+              criteria: "Disk must not be full"
+              successMessage: "Disk space OK"
+              failureMessage: "Disk full — execution will be skipped"
+
+          # REST health-check example (e.g. Kubernetes pod status via API)
+          - id: k8s_pod_check
+            method: REST
+            description: "Verify pods are running via Kubernetes API"
+            request:
+              method: GET
+              url: "https://${K8S_API_HOST}/api/v1/namespaces/${NAMESPACE}/pods"
+              headers:
+                Authorization: "Bearer ${K8S_TOKEN}"
+                Accept: "application/json"
+              timeout: 15
+            onFailure: continue
+            validation:
+              enabled: true
+              type: json_path
+              expression: "$.items[0].status.phase == Running"
+              negate: false
+              criteria: "At least one pod must be in Running state"
+              successMessage: "Pods are running"
+              failureMessage: "No running pods found"
+
+backup:
+  - name: BACKUP
+    description: "<backup purpose>"
+    steps:
+      - target: <TARGET>
+        description: "<step description>"
+        commands:
+          - id: backup_done
+            method: CLI
+            cmd: "cp -rp <src> <dst>"
+            description: "Back up current state"
+            onFailure: skip_block
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              successMessage: "Backup completed"
+              failureMessage: "Backup failed — rollback restore will be skipped"
+
+activity:
+  precheck:
+    - name: ACTIVITY_PRECHECK
+      description: "<precheck purpose>"
+      steps:
+        - target: <TARGET>
+          description: "<step description>"
+          commands:
+            - id: file_exists_check
+              method: CLI
+              cmd: "ls <path>/<file>"
+              description: "Check if file already exists"
+              onFailure: continue
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                criteria: "Decide whether transfer is needed"
+                successMessage: "File already present — transfer will be skipped"
+                failureMessage: "File absent — transfer will proceed"
+
+  execution:
+    - name: <BLOCK_NAME>
+      description: "<execution purpose>"
+      runIf: "disk_check_cmd.passed"
+      steps:
+        - id: transfer_step
+          target: <TARGET>
+          description: "<step description>"
+          runIf: "file_exists_check.failed"
+          commands:
+            - method: CLI
+              cmd: "scp <src> <dst>"
+              description: "Transfer file"
+              onFailure: abort_section
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                successMessage: "Transfer complete"
+                failureMessage: "Transfer failed"
+        - target: <TARGET>
+          description: "<load step>"
+          commands:
+            - if: "${VERSION} == <value>"
+              then:
+                - method: CLI
+                  cmd: "<version-specific command>"
+                  description: "<description>"
+                  onFailure: abort_section
+                  validation:
+                    enabled: true
+                    type: exit_code
+                    expression: "0"
+                    successMessage: "<pass>"
+                    failureMessage: "<fail>"
+              else:
+                - method: CLI
+                  cmd: "<default command>"
+                  description: "<description>"
+                  onFailure: abort_section
+                  validation:
+                    enabled: true
+                    type: exit_code
+                    expression: "0"
+                    successMessage: "<pass>"
+                    failureMessage: "<fail>"
+
+  postcheck:
+    - name: ACTIVITY_POSTCHECK
+      description: "<postcheck purpose>"
+      steps:
+        - target: <TARGET>
+          description: "<step description>"
+          commands:
+            - method: CLI
+              cmd: "ls -ltrh <path>"
+              description: "Verify loaded files"
+              validation:
+                enabled: true
+                type: regex
+                expression: "-rwxrwxrwx.*<filename>"
+                criteria: "File must exist with correct permissions"
+                successMessage: "File present with correct permissions"
+                failureMessage: "File missing or permissions wrong"
+
+postNodeHealthCheck:
+  - name: POST_NODE_HEALTH_CHECK
+    description: "<post-health-check purpose>"
+    steps:
+      - target: <TARGET>
+        description: "<step description>"
+        commands:
+          - method: CLI
+            cmd: "service <svc> status"
+            description: "Verify service still running after activity"
+            onFailure: abort_mop
+            validation:
+              enabled: true
+              type: contains
+              expression: "active (running)"
+              successMessage: "Service running post-activity"
+              failureMessage: "Service not running — escalate immediately"
+
+rollback:
+  precheck:
+    - name: ROLLBACK_PRECHECK
+      description: "<rollback precheck purpose>"
+      steps:
+        - target: <TARGET>
+          description: "<step description>"
+          commands:
+            - id: backup_exists_check
+              method: CLI
+              cmd: "ls <backup_dir>"
+              description: "Confirm backup directory exists"
+              onFailure: continue
+              validation:
+                enabled: true
+                type: not_contains
+                expression: "No such file"
+                criteria: "Backup must exist before restore"
+                successMessage: "Backup found — restore will proceed"
+                failureMessage: "Backup not found — restore will be skipped"
+
+  execution:
+    - name: ROLLBACK_EXECUTION
+      description: "<rollback execution purpose>"
+      steps:
+        - target: <TARGET>
+          description: "<restore step>"
+          commands:
+            - method: CLI
+              cmd: "cp -r <backup_dir>/* <target_dir>"
+              description: "Restore from backup"
+              runIf: "backup_done.passed AND backup_exists_check.passed"
+              onFailure: continue
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                successMessage: "Backup restored"
+                failureMessage: "Restore failed — manual intervention required"
+            - method: CLI
+              cmd: "rm -f <temp_file>"
+              description: "Always remove temporary files"
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                successMessage: "Temp file removed"
+                failureMessage: "Failed to remove temp file"
+
+  postcheck:
+    - name: ROLLBACK_POSTCHECK
+      description: "<rollback postcheck purpose>"
+      steps:
+        - target: <TARGET>
+          description: "<step description>"
+          commands:
+            - method: CLI
+              cmd: "ls <target_dir>"
+              description: "Verify directory state after rollback"
+              validation:
+                enabled: true
+                type: not_contains
+                expression: "No such file"
+                successMessage: "Directory accessible after rollback"
+                failureMessage: "Directory not accessible after rollback"

@@ -1,8 +1,6 @@
 package com.nokia.mopgen;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * CLI entry point for the MOP Generator Utility.
@@ -21,12 +19,11 @@ import java.util.Map;
  *     --output-dir              &lt;/output/mop&gt;                             \
  *     [--crgroup                &lt;CR-001&gt;]
  *
- * <p>{@code --json-dir} is optional — when provided it is prepended to {@code --json-file}
- * to form the full path.  {@code --crgroup} is optional — omit when the CIQ has no group
- * column and all nodes should be included in the summary.
  * </pre>
  *
- * <p>{@code --crgroup} is optional — omit when the CIQ has no group column and
+ * <p>{@code --json-dir} is optional — when provided it is combined with {@code --json-file}
+ * inside {@link MopGenerator#generateSummary} to form the full path.
+ * {@code --crgroup} is optional — omit when the CIQ has no group column and
  * all nodes should be included in the summary.
  *
  * <p>Exit code: 0 = success, 1 = error.
@@ -85,22 +82,11 @@ public class MopGeneratorMain {
             return 1;
         }
 
-        // If --json-dir is provided, combine with --json-file to form the full path
-        if (jsonDir != null && !jsonDir.isEmpty()) {
-            jsonFile = jsonDir + java.io.File.separator + jsonFile;
-        }
-
         try {
-            MopConfig config = new MopConfigLoader().load(templateFile);
-            if (summaryTemplate != null) config.setSummaryTemplatePath(summaryTemplate);
-            String mopFileNameBase = deriveMopFileNameBase(mopFileName, nodeType, activity);
-
-            Map<String, String> scopeFilter = new LinkedHashMap<>();
-            if (crGroup != null && !crGroup.isEmpty()) scopeFilter.put("crGroup", crGroup);
-
-            new MopGenerator(config).generateSummary(
-                    jsonFile, jsonOutputConfigFile, scopeFilter,
-                    nodeType, activity, outputDir, mopFileNameBase);
+            new MopGenerator().generateSummary(
+                    jsonDir, jsonFile, jsonOutputConfigFile,
+                    templateFile, summaryTemplate, crGroup,
+                    nodeType, activity, outputDir, mopFileName);
 
             System.out.println("Approval summary generated in: " + outputDir);
             return 0;
@@ -109,13 +95,6 @@ public class MopGeneratorMain {
             System.err.println("Error: " + e.getMessage());
             return 1;
         }
-    }
-
-    private static String deriveMopFileNameBase(String mopFileName, String nodeType, String activity) {
-        if (mopFileName == null) return nodeType + "_" + activity;
-        return mopFileName.contains(".")
-                ? mopFileName.substring(0, mopFileName.lastIndexOf('.'))
-                : mopFileName;
     }
 
     private static void printUsage() {

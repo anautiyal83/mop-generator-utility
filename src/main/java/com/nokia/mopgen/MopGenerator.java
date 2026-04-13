@@ -36,7 +36,7 @@ public class MopGenerator {
      */
     private static final Pattern VAR_PATTERN = Pattern.compile("\\$\\{([^}]+)\\}");
 
-    private final MopConfig config;
+    private MopConfig config;
 
     /**
      * Variable context for the MOP currently being generated.
@@ -69,8 +69,7 @@ public class MopGenerator {
      */
     private boolean inYamlRollback;
 
-    public MopGenerator(MopConfig config) {
-        this.config = config;
+    public MopGenerator() {
     }
 
     // =========================================================================
@@ -80,23 +79,39 @@ public class MopGenerator {
     /**
      * Generate an approval summary from a unified JSON file produced by ciq-processor.
      *
-     * <p>The YAML template (loaded into {@code config}) drives what activity/rollback
-     * sections appear in the summary.  The {@code scopeFilter} narrows the JSON to the
-     * desired CR (e.g. {@code {"crGroup": "CR001"}}).  Pass an empty map when the CIQ
-     * has no group column and all nodes should be included.
+     * <p>Loads the YAML MOP template from {@code templateFile}, resolves the JSON path
+     * from {@code jsonDir} + {@code jsonFile}, filters nodes by {@code crGroup} when
+     * provided, and writes the approval summary to {@code outputDir}.
      *
-     * @param jsonFilePath          path to the unified JSON file
+     * @param jsonDir               optional directory containing the JSON file (may be null or empty)
+     * @param jsonFile              JSON file name; combined with {@code jsonDir} when provided
      * @param jsonOutputConfigFile  path to the {@code *_json-output.yaml} config
-     * @param scopeFilter           key/value scope filter (empty = include all nodes)
+     * @param templateFile          path to the MOP template YAML (may be null for defaults)
+     * @param summaryTemplate       optional path to an external HTML summary template
+     * @param crGroup               optional CR group filter; null or empty = include all nodes
      * @param nodeType              e.g. "MRF"
      * @param activity              e.g. "ANNOUNCEMENT_LOADING"
      * @param outputDir             directory where the summary file will be written
-     * @param mopFileNameBase       base name for the output file
+     * @param mopFileName           output file base name (null = derived from nodeType + activity)
      */
-    public void generateSummary(String jsonFilePath, String jsonOutputConfigFile,
-                                 Map<String, String> scopeFilter,
+    public void generateSummary(String jsonDir, String jsonFile, String jsonOutputConfigFile,
+                                 String templateFile, String summaryTemplate, String crGroup,
                                  String nodeType, String activity,
-                                 String outputDir, String mopFileNameBase) throws IOException {
+                                 String outputDir, String mopFileName) throws IOException {
+
+        config = new MopConfigLoader().load(templateFile);
+        if (summaryTemplate != null) config.setSummaryTemplatePath(summaryTemplate);
+
+        String mopFileNameBase = (mopFileName != null)
+                ? (mopFileName.contains(".") ? mopFileName.substring(0, mopFileName.lastIndexOf('.')) : mopFileName)
+                : nodeType + "_" + activity;
+
+        Map<String, String> scopeFilter = new LinkedHashMap<>();
+        if (crGroup != null && !crGroup.isEmpty()) scopeFilter.put("crGroup", crGroup);
+
+        String jsonFilePath = (jsonDir != null && !jsonDir.isEmpty())
+                ? jsonDir + java.io.File.separator + jsonFile
+                : jsonFile;
 
         String nodeNameKey = config.getJsonMapping().getOrDefault("nodeNameKey", "node");
         String neIdKey     = config.getJsonMapping().getOrDefault("neIdKey",     "niamID");
@@ -106,8 +121,6 @@ public class MopGenerator {
         log.info("JSON output config: {}", jsonOutputConfigFile);
         log.info("Scope filter: {}, Node type: {}, Activity: {}", scopeFilter, nodeType, activity);
 
-        String base  = (mopFileNameBase != null && !mopFileNameBase.isEmpty())
-                ? mopFileNameBase : nodeType + "_" + activity;
         String today = new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date());
 
         // Read node data from the unified JSON
@@ -128,14 +141,10 @@ public class MopGenerator {
             String neId     = nodeData.getNodeInfo().getOrDefault(neIdKey, nodeName);
             log.info("  Processing node {} (neId={})", nodeName, neId);
 
-            YamlMopGroup yamlGroup = buildYamlGroupFromNodeData(
-                    nodeData, nodeType, activity, nodeName, neId);
+            YamlMopGroup yamlGroup = buildYamlGroupFromNodeData(nodeData, nodeType, activity, nodeName, neId);
             if (yamlGroup != null) {
-                // Only include node-identifier fields — CIQ data fields belong in sections/commands
-                Map<String, String> unitInfo = new LinkedHashMap<>();
-                unitInfo.put(nodeNameKey, nodeName);
-                unitInfo.put(neIdKey, neId);
-                summaryDoc.addUnit(GroupApprovalMopGenerator.toSummaryUnit(yamlGroup, unitInfo));
+                summaryDoc.addUnit(GroupApprovalMopGenerator.toSummaryUnit(
+                        yamlGroup, new LinkedHashMap<>(nodeData.getNodeInfo())));
             }
         }
 
@@ -145,7 +154,7 @@ public class MopGenerator {
             String ext         = "MSWORD".equalsIgnoreCase(config.getMopApprovalFormatType()) ? "docx" : "html";
             String scopeValue  = scopeFilter.getOrDefault("crGroup", scopeFilter.getOrDefault("group", ""));
             String suffix      = scopeValue.isEmpty() ? "" : "_" + scopeValue;
-            String summaryPath = outputDir + "/" + base + suffix + "_SUMMARY." + ext;
+            String summaryPath = outputDir + "/" + mopFileNameBase + suffix + "_SUMMARY." + ext;
             approvalGen.generate(summaryDoc, summaryPath);
             log.info("Summary written: {}", summaryPath);
         }

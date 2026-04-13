@@ -1,207 +1,484 @@
 # ============================================================================
-# MOP Template: MRF - ANNOUNCEMENT_LOADING
+# MOP Template: MRF — ANNOUNCEMENT_LOADING
 # Naming convention: {NODE_TYPE}_{ACTIVITY}_MOP-Template.yaml
 #
-# Use-case: Load announcement audio files (TAR or individual) onto MRF nodes.
-# Mode: Static CLI — no CIQ-driven XML generation.
-#       All configuration blocks are defined explicitly under 'execution'.
+# This single file drives BOTH:
+#   1. MOP Summary (approval document) generation — mop-generator-utility
+#   2. MOP Execution                              — network-command-executor-utility
 #
-# Assumptions:
-#   - Announcement files are uploaded to the Repository server before ordering.
-#   - ANN_DIR = /var/opt/swms/clips/persistent/provisioned/audioclips/<CIRCLE>/PREPAID/
-#   - Login to NE is performed via NIAM (CTRL+P+E to switch to root).
+# Use-case: Load announcement audio files (TAR or individual) onto MRF nodes.
+#
+# Cross-phase linking demonstrated in this template:
+#   - git availability check (CLI) → decides which download path runs
+#   - If git is absent, GitHub REST API is used instead of git clone
+#   - Disk space check failure    → execution section is skipped
+#   - File already present check  → SCP transfer step is skipped
+#   - Backup success              → guards the restore command in rollback
 # ============================================================================
 
-# No XML generation needed for this activity — omit xmlBuilder, defaultNamespace,
-# netconfNamespace, configAttributes, and tables sections entirely.
+
+# ============================================================================
+# TOP-LEVEL METADATA
+# ============================================================================
+nodeType:  MRF
+activity:  ANNOUNCEMENT_LOADING
+mopApprovalFormatType: HTML
+# summaryTemplatePath: templates/mop-summary-template.html
+
 
 # ============================================================================
 # CONSTANTS
-# Named values substituted into every command at MOP generation time.
-# Reference a constant anywhere in commands using $KEY syntax.
 # ============================================================================
 constants:
-  #ANN_DIR:  "/var/opt/swms/clips/persistent/provisioned/audioclips/${CIRCLE}/PREPAID"
- 
+  REPO_SERVER:    "repo-server.example.com"
+  REPO_BASE_DIR:  "/opt/announcements"
+  LOCAL_WORK_DIR: "/tmp/mop-work"
+  GIT_REPO_URL:   "https://git.example.com/announcements.git"
+  GIT_OWNER:      "nokia-nw"
+  GIT_REPO:       "announcement-files"
+  GIT_BRANCH:     "main"
 
-# Approval document format:
-#   TEXT    — no separate approval doc; the MOP file itself is used for approval
-#   HTML    — generates an HTML approval document
-#   MSWORD  — generates a .docx MS Word approval document
-# Approval summary is always one per CRGROUP: <base>_<crgroup>_SUMMARY.<ext>
-mopApprovalFormatType: HTML
+
 # ============================================================================
 # SECTION 1 — PRE_NODE_HEALTH_CHECK
 # ============================================================================
 preNodeHealthCheck:
-  - name: "PRE_NODE_HEALTH_CHECK"
-    description: "Verify MRF node health before announcement loading"
-    targetNode: "MRF_NODE"
-    method: CLI
-    commands:
-      - cmd: "CTRL+P+E"                # Switch to Privilege Mode
-        description: "Switch to Privilege Mode"
-        validation: "Output should contain text 'Privilege Escalation successful.'"
-      - cmd: "date"                    # INFO
-        description: "Prints System Date"
-        validation: "Info Only"
-      - cmd: "time"                    # INFO
-        description: "Prints System Time"
-        validation: "Info Only"
-      - cmd: "service swms status"     # Validate: service must be running
-        description: "Verify SWMS services are running before loading files"
-        validation: "Output must show 'active (running)'"
+
+  - name: PRE_NODE_HEALTH_CHECK
+    description: "Fetch announcement files and verify MRF node health"
+
+    steps:
+
+      # ── Step 1: MRF_NODE — verify node health ─────────────────────────────
+      - id: node_health_step
+        target: MRF_NODE
+        description: "Verify MRF node services and available disk space"
+        commands:
+          - method: CLI
+            cmd: "CTRL+P+E"
+            description: "Escalate to privilege mode"
+            onFailure: abort_section
+            validation:
+              enabled: true
+              type: contains
+              expression: "Privilege Escalation successful"
+              successMessage: "Privilege mode activated"
+              failureMessage: "Privilege escalation failed — do not proceed"
+
+          - method: CLI
+            cmd: "date && time"
+            description: "Record system date and time (informational)"
+            validation:
+              enabled: false
+
+          - method: CLI
+            cmd: "service swms status"
+            description: "Verify SWMS services are active"
+            onFailure: abort_mop
+            failureCode: "SWMS_SERVICE_DOWN"
+            validation:
+              enabled: true
+              type: contains
+              expression: "active (running)"
+              criteria: "All SWMS services must be in running state before proceeding"
+              successMessage: "SWMS service is running"
+              failureMessage: "SWMS service is not running — MOP aborted"
+
+          - id: precheck_file_exists
+            method: CLI
+            cmd: "ls ${MRF_DESTINATION_PATH}/${INPUT_FILE}"
+            description: "Check whether the announcement file is already present"
+            onFailure: continue
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              criteria: "Detect if file already exists to decide whether SCP is needed"
+              successMessage: "File already present — SCP transfer will be skipped"
+              failureMessage: "File not yet present — SCP transfer will proceed"
+
+          - id: precheck_disk_space
+            method: CLI
+            cmd: "df -h ${MRF_DESTINATION_PATH}"
+            description: "Check available disk space on announcement directory mount"
+            onFailure: skip_block
+            failureCode: "DISK_FULL"
+            validation:
+              enabled: true
+              type: not_contains
+              expression: "100%"
+              criteria: "Disk must not be 100% full before loading new files"
+              successMessage: "Sufficient disk space available"
+              failureMessage: "Disk is full — execution section will be skipped"
+
 
 # ============================================================================
 # SECTION 2 — BACKUP
-# Back up existing announcement files so rollback can restore them.
 # ============================================================================
 backup:
-  - name: "BACKUP"
+
+  - name: BACKUP
     description: "Back up existing announcement files before loading new ones"
-    targetNode: "MRF_NODE"
-    method: CLI
-    commands:
-     - cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
-       description: "Display Files and folders in the announcement directory"
-       validation: "Validate that files and folders exists in the announcement directory"
-     - cmd: "mkdir -p /tmp/${VERSION}/"
-       description: "Creates temp directory with the MRF version"
-       validation: "Validate that a mkdir command is executed successfully, with no errors"
-     - cmd: "cp -rp ${MRF_DESTINATION_PATH}/* /tmp/${VERSION}/"
-       description: "Copy all files and folders from announcement directory to temp directory"
-       validation: "Validate that a cp command is executed successfully, with no errors"
+
+    steps:
+
+      - id: backup_step
+        target: MRF_NODE
+        description: "Copy current announcement files to a versioned backup directory"
+        commands:
+          - method: CLI
+            cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
+            description: "List current contents of announcement directory"
+            validation:
+              enabled: true
+              type: not_contains
+              expression: "No such file or directory"
+              criteria: "Announcement directory must exist before backup"
+              successMessage: "Announcement directory found"
+              failureMessage: "Announcement directory not found — nothing to back up"
+
+          - method: CLI
+            cmd: "mkdir -p /tmp/${VERSION}/"
+            description: "Create versioned temp directory for backup"
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              successMessage: "Backup directory created"
+              failureMessage: "Failed to create backup directory"
+
+          - id: backup_copy_cmd
+            method: CLI
+            cmd: "cp -rp ${MRF_DESTINATION_PATH}/* /tmp/${VERSION}/"
+            description: "Copy all announcement files to backup directory"
+            onFailure: skip_block
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              criteria: "All files must be copied without error"
+              successMessage: "Backup completed successfully"
+              failureMessage: "Backup copy failed — rollback restore will be skipped"
+
 
 # ============================================================================
 # SECTION 3 — ACTIVITY
-# 3a. ACTIVITY_PRECHECK   — baseline state before loading
-# 3b. ACTIVITY_EXECUTION  — file transfer and loading (static CLI)
-# 3c. ACTIVITY_POSTCHECK  — verify files loaded with correct permissions
 # ============================================================================
 activity:
 
-  # --------------------------------------------------------------------------
-  # 3a. ACTIVITY_PRECHECK
-  # --------------------------------------------------------------------------
+  # ── 3a. ACTIVITY_PRECHECK ─────────────────────────────────────────────────
   precheck:
-    - name: "ACTIVITY_PRECHECK"
+
+    - name: ACTIVITY_PRECHECK
       description: "Capture pre-activity state of announcement directory"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-        - cmd: "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"${INPUT_FILE}\""
-          description: "List all the files in announcement directory with files name matching input file"
-          validation: "Validate if input file already exists in announcement directory"
 
-  # --------------------------------------------------------------------------
-  # 3b. ACTIVITY_EXECUTION  (static CLI mode — no 'configuration' list needed)
-  # Transfer announcement files and load them into the announcement directory.
-  # --------------------------------------------------------------------------
+      steps:
+
+      # ── Step 3a: REST path — GitHub API download (only if git is absent) ──
+      - id: git_api_step
+        target: LOCAL
+        description: "Download announcement archive via GitHub REST API"
+        commands:
+          - id: git_api_download
+            method: REST
+            description: "Download repository archive from GitHub API"
+            request:
+              method: GET
+              url: "https://api.github.com/repos/${GIT_OWNER}/${GIT_REPO}/zipball/${GIT_BRANCH}"
+              headers:
+                Accept: "application/vnd.github+json"
+              auth:
+                type: bearer
+                token: "${GIT_TOKEN}"
+              saveResponseTo: "${LOCAL_WORK_DIR}/ann-files.zip"
+              timeout: 60
+              followRedirects: true
+            onFailure: abort_section
+            validation:
+              enabled: true
+              type: http_status
+              expression: "200"
+              criteria: "GitHub API must return HTTP 200 for a successful archive download"
+              successMessage: "Announcement archive downloaded via GitHub API"
+              failureMessage: "GitHub API returned a non-200 status — check token and repository name"
+
+
+      # ── Step 2: REPO_SERVER — stage files ─────────────────────────────────
+      # Runs if either download path succeeded.
+      - id: repo_stage_step
+        target: REPO_SERVER
+        description: "Stage announcement files on the repository server"
+        runIf: "git_api_download.passed"
+        commands:
+          - method: CLI
+            cmd: "mkdir -p ${REPO_BASE_DIR}/${VERSION}/"
+            description: "Create versioned staging directory on repo server"
+            validation:
+              enabled: true
+              type: exit_code
+              expression: "0"
+              successMessage: "Staging directory created"
+              failureMessage: "Failed to create staging directory on repo server"
+
+          - id: repo_stage_cmd
+            method: CLI
+            cmd: "rsync -av ${LOCAL_WORK_DIR}/ann-files/ ${REPO_BASE_DIR}/${VERSION}/"
+            description: "Synchronise announcement files from local to repo server"
+            onFailure: abort_section
+            validation:
+              enabled: true
+              type: contains
+              expression: "sent"
+              criteria: "rsync must report bytes sent to confirm files transferred"
+              successMessage: "Files staged on repository server"
+              failureMessage: "rsync to repository server failed"
+              
+      - id: check_file_step
+        target: MRF_NODE
+        description: "Snapshot announcement directory before loading"
+        commands:
+          - id: precheck_listing
+            method: CLI
+            cmd: "ls -ltrh ${MRF_DESTINATION_PATH}"
+            description: "Record directory listing before any changes"
+            saveOutputAs: "pre_dir_listing"
+            validation:
+              enabled: true
+              type: info_only
+              criteria: "Informational snapshot — not a blocking check"
+              successMessage: "Pre-activity directory state captured"
+              failureMessage: "Could not list announcement directory"      
+
+  # ── 3b. ACTIVITY_EXECUTION ────────────────────────────────────────────────
   execution:
-    - name: "TRANSFER_ANNOUNCEMENT_FILES"
-      description: "SFTP announcement files (TAR or individual) to /tmp on MRF"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-        - "# SFTP the announcement file(s) relevant for this MRF to /tmp"
-        - "sftp /<SOURCE_DIR>  /tmp/${INPUT_FILE}"
 
-    - name: "LOAD_ANNOUNCEMENT_FILES"
-      description: "Copy announcement files to announcement directory and set permissions"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-        - if: "${VERSION} == 13.X.X.X" # matches regex i.e X means anything. check docs for exact usage
-          then: # Copy individual files from untar folder
-            - cmd: "cp -r /tmp/${INPUT_FILE | stripExt}/* ${MRF_DESTINATION_PATH}"
-              description: "Copy individual files from untar(temp) folder to announcement directory"
-              validation: "Validate that copy command is executed successfully"           
-            - cmd: "chmod 777 ${MRF_DESTINATION_PATH}"
-              description: "change file permission to 777"
-              validation: "Validate that chmod command is executed successfully"
-          else: # Untar directly to announcement directory
-            - cmd: "tar -xf /tmp/${INPUT_FILE} -C ${MRF_DESTINATION_PATH}"
-              description: "Untar input file to directly to announcement directory"
-              validation: "Validate that tar command is executed successfully"
-            - cmd: "chmod 777 ${MRF_DESTINATION_PATH}"
-              description: "change file permission to 777"
-              validation: "Validate that chmod command is executed successfully"
+    - name: TRANSFER_ANNOUNCEMENT_FILES
+      description: "Transfer announcement file from repository server to MRF node"
+      runIf: "precheck_disk_space.passed"
 
-  # --------------------------------------------------------------------------
-  # 3c. ACTIVITY_POSTCHECK
-  # --------------------------------------------------------------------------
+      steps:
+
+        - id: scp_step
+          target: MRF_NODE
+          description: "Copy announcement file from repo server to MRF /tmp"
+          runIf: "precheck_file_exists.failed"
+          commands:
+            - id: scp_cmd
+              method: CLI
+              cmd: "scp admin@${REPO_SERVER}:${REPO_BASE_DIR}/${VERSION}/${INPUT_FILE} /tmp/${INPUT_FILE}"
+              description: "Secure-copy announcement file from repo server to MRF /tmp"
+              onFailure: abort_section
+              failureCode: "SCP_TRANSFER_ERROR"
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                criteria: "SCP must exit 0 — any non-zero exit means transfer failed"
+                successMessage: "File transferred to MRF /tmp successfully"
+                failureMessage: "SCP transfer failed — check repo server connectivity"
+
+    - name: LOAD_ANNOUNCEMENT_FILES
+      description: "Extract or copy files into announcement directory"
+      runIf: "precheck_disk_space.passed"
+
+      steps:
+
+        - target: MRF_NODE
+          description: "Load announcement file into announcement directory"
+          commands:
+            - if:   "${VERSION} == 13.X.X.X"
+              then:
+                - method: CLI
+                  cmd: "cp -r /tmp/${INPUT_FILE | stripExt}/* ${MRF_DESTINATION_PATH}"
+                  description: "Copy individual files from untarred folder (v13)"
+                  onFailure: abort_section
+                  validation:
+                    enabled: true
+                    type: exit_code
+                    expression: "0"
+                    successMessage: "Files copied to announcement directory"
+                    failureMessage: "File copy failed"
+                - method: CLI
+                  cmd: "chmod 777 ${MRF_DESTINATION_PATH}"
+                  description: "Set permissions on announcement directory"
+                  validation:
+                    enabled: true
+                    type: exit_code
+                    expression: "0"
+                    successMessage: "Permissions set"
+                    failureMessage: "chmod failed"
+              else:
+                - method: CLI
+                  cmd: "tar -xf /tmp/${INPUT_FILE} -C ${MRF_DESTINATION_PATH}"
+                  description: "Untar announcement archive into announcement directory"
+                  onFailure: abort_section
+                  validation:
+                    enabled: true
+                    type: exit_code
+                    expression: "0"
+                    successMessage: "Archive extracted successfully"
+                    failureMessage: "tar extraction failed"
+                - method: CLI
+                  cmd: "chmod 777 ${MRF_DESTINATION_PATH}"
+                  description: "Set permissions on announcement directory"
+                  validation:
+                    enabled: true
+                    type: exit_code
+                    expression: "0"
+                    successMessage: "Permissions set"
+                    failureMessage: "chmod failed"
+
+  # ── 3c. ACTIVITY_POSTCHECK ────────────────────────────────────────────────
   postcheck:
-    - name: "ACTIVITY_POSTCHECK"
-      description: "Verify announcement files copied correctly with right permissions"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-        - cmd: "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"/${INPUT_FILE | stripExt}\""
-          description: "List all the files in announcement directory with same name as input file"
-          validation: "Validate if input file already exists in announcement directory and there permission should -rwxrwxrwx"
+
+    - name: ACTIVITY_POSTCHECK
+      description: "Verify announcement files loaded correctly with correct permissions"
+
+      steps:
+
+        - target: MRF_NODE
+          description: "Confirm file exists and has expected permissions"
+          commands:
+            - method: CLI
+              cmd: "ls -ltrh ${MRF_DESTINATION_PATH} | grep \"/${INPUT_FILE | stripExt}\""
+              description: "List announcement directory filtered by input file name"
+              validation:
+                enabled: true
+                type: regex
+                expression: "-rwxrwxrwx.*${INPUT_FILE | stripExt}"
+                criteria: "File must exist with permissions -rwxrwxrwx"
+                successMessage: "Announcement file present with correct permissions"
+                failureMessage: "File missing or permissions incorrect"
+
+            - method: CLI
+              cmd: "ls -ltrh ${MRF_DESTINATION_PATH}"
+              description: "Verify directory contents changed after loading"
+              validation:
+                enabled: true
+                type: compare_output
+                expression: "pre_dir_listing"
+                comparator: not_equals
+                criteria: "Directory listing must differ from pre-activity snapshot"
+                successMessage: "Directory contents changed — new files loaded successfully"
+                failureMessage: "Directory contents unchanged — files may not have loaded"
+
+
 # ============================================================================
 # SECTION 4 — POST_NODE_HEALTH_CHECK
 # ============================================================================
 postNodeHealthCheck:
-  - name: "POST_NODE_HEALTH_CHECK"
+
+  - name: POST_NODE_HEALTH_CHECK
     description: "Verify MRF node health after announcement loading"
-    targetNode: "MRF_NODE"
-    method: CLI
-    commands:
-     - cmd: "service swms status"     # Validate: service must be running
-       description: "Verify SWMS services are running before loading files"
-       validation: "Output must show 'active (running)'"      
+
+    steps:
+
+      - target: MRF_NODE
+        description: "Confirm SWMS services remain healthy post-load"
+        commands:
+          - method: CLI
+            cmd: "service swms status"
+            description: "Verify SWMS services are still running after file loading"
+            onFailure: abort_mop
+            failureCode: "SWMS_SERVICE_DOWN_POST_LOAD"
+            validation:
+              enabled: true
+              type: contains
+              expression: "active (running)"
+              criteria: "SWMS service must remain active after announcement loading"
+              successMessage: "SWMS service is running post-load"
+              failureMessage: "SWMS service is not running after load — escalate immediately"
+
 
 # ============================================================================
 # SECTION 5 — ROLLBACK
-# 5a. ROLLBACK_PRECHECK   — verify backup exists before restoring
-# 5b. ROLLBACK_EXECUTION  — restore backup or remove newly loaded files
-# 5c. ROLLBACK_POSTCHECK  — verify announcement directory state after rollback
 # ============================================================================
 rollback:
 
-  # --------------------------------------------------------------------------
-  # 5a. ROLLBACK_PRECHECK
-  # --------------------------------------------------------------------------
   precheck:
-    - name: "ROLLBACK_PRECHECK"
-      description: "Verify backup exists and node state before rollback"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-       - cmd: "CTRL+P+E"                # Switch to Privilege Mode
-         description: "Switch to Privilege Mode"
-         validation: "Output should contain text 'Privilege Escalation successful.'"
-       - cmd: "ls -lrth /tmp/${VERSION}" # Confirm backup is present
-         description: "Lists all the files in temp directory with MRF Node version"
-         validation: "Validate if input file backup files(same version name) exists in tmp directory"
-                 
-  # --------------------------------------------------------------------------
-  # 5b. ROLLBACK_EXECUTION  (static CLI mode — no 'configuration' list needed)
-  # Restore backup if it exists; otherwise remove the newly loaded files.
-  # --------------------------------------------------------------------------
-  execution:
-    - name: "ROLLBACK_ANNOUNCEMENT_FILES"
-      description: "Restore announcement files from backup or remove new files"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-       - cmd: "cp -r /tmp/${VERSION}/*  ${MRF_DESTINATION_PATH}"  
-         description: "Restore or Copy the backup files in announcement directory"
-         validation: "Validate that copy command is executed successfully"
-       - cmd: "rm -f ${MRF_DESTINATION_PATH}/*" 
-         description: "Remove the announcement file from announcement directory"
-         validation: "Validate that rm command is executed successfully"
 
-  # --------------------------------------------------------------------------
-  # 5c. ROLLBACK_POSTCHECK
-  # --------------------------------------------------------------------------
+    - name: ROLLBACK_PRECHECK
+      description: "Verify backup exists and privilege mode before rollback"
+
+      steps:
+
+        - target: MRF_NODE
+          description: "Confirm backup directory and privilege mode"
+          commands:
+            - method: CLI
+              cmd: "CTRL+P+E"
+              description: "Escalate to privilege mode"
+              onFailure: abort_section
+              validation:
+                enabled: true
+                type: contains
+                expression: "Privilege Escalation successful"
+                successMessage: "Privilege mode activated"
+                failureMessage: "Privilege escalation failed — cannot rollback"
+
+            - id: rollback_backup_check
+              method: CLI
+              cmd: "ls -lrth /tmp/${VERSION}"
+              description: "Confirm backup directory exists and is non-empty"
+              onFailure: continue
+              validation:
+                enabled: true
+                type: not_contains
+                expression: "No such file or directory"
+                criteria: "Backup directory /tmp/${VERSION} must exist before restore"
+                successMessage: "Backup directory found — restore will proceed"
+                failureMessage: "Backup directory not found — restore will be skipped"
+
+  execution:
+
+    - name: ROLLBACK_ANNOUNCEMENT_FILES
+      description: "Restore announcement directory from backup or clean up new files"
+
+      steps:
+
+        - target: MRF_NODE
+          description: "Restore backup and remove temporary files"
+          commands:
+            - method: CLI
+              cmd: "cp -r /tmp/${VERSION}/* ${MRF_DESTINATION_PATH}"
+              description: "Restore backed-up files to announcement directory"
+              runIf: "backup_copy_cmd.passed AND rollback_backup_check.passed"
+              onFailure: continue
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                criteria: "Files must copy back without error"
+                successMessage: "Backup files restored to announcement directory"
+                failureMessage: "Restore copy failed — manual intervention required"
+
+            - method: CLI
+              cmd: "rm -f /tmp/${INPUT_FILE}"
+              description: "Remove the newly loaded announcement file from /tmp"
+              validation:
+                enabled: true
+                type: exit_code
+                expression: "0"
+                successMessage: "Temporary file removed from /tmp"
+                failureMessage: "Failed to remove temporary file from /tmp"
+
   postcheck:
-    - name: "ROLLBACK_POSTCHECK"
-      description: "Verify rollback completed and announcement directory is restored"
-      targetNode: "MRF_NODE"
-      method: CLI
-      commands:
-       - cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
-         description: "Lists all the files in announcement directory"
-         validation: "Validate if backup files exists in announcement directory"
+
+    - name: ROLLBACK_POSTCHECK
+      description: "Verify announcement directory state after rollback"
+
+      steps:
+
+        - target: MRF_NODE
+          description: "Confirm announcement directory is accessible after rollback"
+          commands:
+            - method: CLI
+              cmd: "ls -lrth ${MRF_DESTINATION_PATH}"
+              description: "List announcement directory contents post-rollback"
+              validation:
+                enabled: true
+                type: not_contains
+                expression: "No such file or directory"
+                criteria: "Announcement directory must be accessible after rollback"
+                successMessage: "Announcement directory accessible — rollback complete"
+                failureMessage: "Announcement directory not accessible after rollback"

@@ -152,16 +152,46 @@ public class MopConfigLoader {
         if (raw == null) return ac;
         if (raw.containsKey("name"))        ac.setName((String) raw.get("name"));
         if (raw.containsKey("description")) ac.setDescription((String) raw.get("description"));
-        if (raw.containsKey("targetNode"))  ac.setTargetNode((String) raw.get("targetNode"));
-        if (raw.containsKey("method"))      ac.setMethod((String) raw.get("method"));
-        if (raw.containsKey("commands"))    ac.setCommandEntries(parseCommandEntries(raw.get("commands")));
+
+        if (raw.containsKey("steps")) {
+            // New format: commands are inside steps, each step has its own target
+            List<Map<String, Object>> steps = (List<Map<String, Object>>) raw.get("steps");
+            List<CommandEntry> allEntries = new ArrayList<>();
+            String firstTarget = null;
+            String firstMethod = null;
+            for (Map<String, Object> step : steps) {
+                if (firstTarget == null && step.containsKey("target"))
+                    firstTarget = (String) step.get("target");
+                if (step.containsKey("commands")) {
+                    // Capture the method from the first explicit command method seen
+                    if (firstMethod == null) {
+                        for (Object cmd : (List<Object>) step.get("commands")) {
+                            if (cmd instanceof Map && ((Map<?, ?>) cmd).containsKey("method")) {
+                                firstMethod = (String) ((Map<String, Object>) cmd).get("method");
+                                break;
+                            }
+                        }
+                    }
+                    allEntries.addAll(parseCommandEntries(step.get("commands")));
+                }
+            }
+            if (firstTarget != null) ac.setTargetNode(firstTarget);
+            if (firstMethod != null) ac.setMethod(firstMethod);
+            ac.setCommandEntries(allEntries);
+        } else {
+            // Legacy format: targetNode / method / commands at block level
+            if (raw.containsKey("targetNode"))  ac.setTargetNode((String) raw.get("targetNode"));
+            if (raw.containsKey("method"))      ac.setMethod((String) raw.get("method"));
+            if (raw.containsKey("commands"))    ac.setCommandEntries(parseCommandEntries(raw.get("commands")));
+        }
         return ac;
     }
 
     /**
-     * Parse a YAML commands list where each item is either a plain {@code String}
-     * or a conditional map with {@code if}/{@code then}/{@code else} keys,
+     * Parse a YAML commands list where each item is either a plain {@code String},
+     * a conditional map with {@code if}/{@code then}/{@code else} keys,
      * or a rich map with {@code cmd}/{@code description}/{@code validation} keys.
+     * The {@code validation} value may be a String (legacy) or a Map (new format).
      */
     @SuppressWarnings("unchecked")
     private List<CommandEntry> parseCommandEntries(Object raw) {
@@ -173,12 +203,33 @@ public class MopConfigLoader {
             } else if (item instanceof Map) {
                 Map<String, Object> map = (Map<String, Object>) item;
                 if (map.containsKey("cmd")) {
-                    // Rich command: cmd + optional description + optional validation
+                    // Rich CLI command: cmd + optional description + optional validation
+                    Object valRaw = map.get("validation");
+                    String validation;
+                    if (valRaw instanceof String) {
+                        validation = (String) valRaw;
+                    } else if (valRaw instanceof Map) {
+                        validation = extractValidationSummary((Map<String, Object>) valRaw);
+                    } else {
+                        validation = null;
+                    }
                     result.add(CommandEntry.rich(
                             (String) map.get("cmd"),
                             (String) map.get("description"),
-                            (String) map.get("validation")));
-                } else {
+                            validation));
+                } else if (map.containsKey("request")) {
+                    // REST command: synthesise a readable command from method + url
+                    Map<String, Object> req = (Map<String, Object>) map.get("request");
+                    String httpMethod = req != null ? (String) req.get("method") : null;
+                    String url        = req != null ? (String) req.get("url")    : null;
+                    String cmdText    = (httpMethod != null && url != null)
+                            ? httpMethod + " " + url : (url != null ? url : "REST");
+                    Object valRaw = map.get("validation");
+                    String validation = (valRaw instanceof Map)
+                            ? extractValidationSummary((Map<String, Object>) valRaw)
+                            : (valRaw instanceof String ? (String) valRaw : null);
+                    result.add(CommandEntry.rich(cmdText, (String) map.get("description"), validation));
+                } else if (map.containsKey("if")) {
                     // Conditional: if/then/else
                     String condition  = (String) map.get("if");
                     List<CommandEntry> thenCmds = map.containsKey("then")
@@ -190,6 +241,24 @@ public class MopConfigLoader {
             }
         }
         return result;
+    }
+
+    /**
+     * Produces a one-line human-readable summary from a structured validation map.
+     * Prefers {@code criteria}, then falls back to {@code type: expression}.
+     */
+    @SuppressWarnings("unchecked")
+    private String extractValidationSummary(Map<String, Object> valMap) {
+        if (valMap == null) return null;
+        Boolean enabled = valMap.containsKey("enabled") ? (Boolean) valMap.get("enabled") : null;
+        if (Boolean.FALSE.equals(enabled)) return null;
+        if (valMap.containsKey("criteria")) return String.valueOf(valMap.get("criteria"));
+        Object type = valMap.get("type");
+        Object expr = valMap.get("expression");
+        if ("info_only".equals(type)) return null;
+        if (type != null && expr != null) return type + ": " + expr;
+        if (expr != null) return String.valueOf(expr);
+        return null;
     }
 
     @SuppressWarnings("unchecked")
