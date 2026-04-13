@@ -189,7 +189,7 @@ public class MopGenerator {
         inYamlRollback = false;
 
         // Pre-scan all tables for variable context
-        for (List<Map<String, Object>> rows : nodeData.getAllTables().values()) {
+        for (List<Map<String, Object>> rows : nodeData.getAllConfigData().values()) {
             if (!rows.isEmpty()) enrichVariableContextFromGenericRows(rows);
         }
         log.debug("Variable context for {}: {}", nodeName, variableContext.keySet());

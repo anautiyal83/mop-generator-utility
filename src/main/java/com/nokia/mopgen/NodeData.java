@@ -111,7 +111,7 @@ public class NodeData {
      * @return map of table name → list of row objects
      */
     @SuppressWarnings("unchecked")
-    public Map<String, List<Map<String, Object>>> getAllTables() {
+    public Map<String, List<Map<String, Object>>> getAllConfigData() {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         for (Map.Entry<String, Object> e : configData.entrySet()) {
             if (e.getValue() instanceof List) {
